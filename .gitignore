@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Env
+.env
+.env.local
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local runtime artifacts (data lives outside the repo, but just in case)
+*.log
+/tmp/
