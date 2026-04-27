@@ -8,4 +8,5 @@ requests==2.33.1
 nvidia-cublas-cu12==12.9.2.10
 nvidia-cudnn-cu12==9.21.1.3
 nvidia-cuda-nvrtc-cu12==12.9.86
+yt-dlp==2026.3.17
 anthropic==0.40.0
