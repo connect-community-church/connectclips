@@ -1,8 +1,22 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from app.config import settings
+from app.routers import jobs as jobs_router
+from app.routers import sermons as sermons_router
 
-app = FastAPI(title="ConnectClips")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    for d in (settings.data_sources_dir, settings.data_work_dir, settings.data_clips_dir):
+        d.mkdir(parents=True, exist_ok=True)
+    yield
+
+
+app = FastAPI(title="ConnectClips", lifespan=lifespan)
+app.include_router(sermons_router.router)
+app.include_router(jobs_router.router)
 
 
 @app.get("/health")
