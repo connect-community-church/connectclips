@@ -3,4 +3,9 @@ uvicorn[standard]==0.32.1
 pydantic-settings==2.6.1
 python-multipart==0.0.20
 faster-whisper==1.1.0
+requests==2.33.1
+# CUDA runtime libs for ctranslate2 (faster-whisper backend) — preloaded by app.cuda_preload
+nvidia-cublas-cu12==12.9.2.10
+nvidia-cudnn-cu12==9.21.1.3
+nvidia-cuda-nvrtc-cu12==12.9.86
 anthropic==0.40.0
