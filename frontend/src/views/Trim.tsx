@@ -209,26 +209,52 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
 
   // Decide whether to show the face picker.
   //
-  // The identity tracker can fragment a single person across layout changes
-  // (full-frame → PiP-right → PiP-middle) because the centroid position and
-  // face size shift between layouts and look like "different people" without
-  // proper face embeddings. A solo-pastor sermon with active ATEM switching
-  // typically produces 6-13 identity tracks for what's really just the pastor.
+  // Two failure modes the heuristic has to dodge, both stemming from the
+  // identity tracker matching by centroid + size only (no face embeddings):
   //
-  // Heuristic: show the picker only when 2-4 identities each account for at
-  // least 10 % of detection samples. That covers the genuine multi-person
-  // case (pastor + guest both on screen — single shot, no layout shuffle)
-  // and skips the layout-fragmentation mess. Above 4 significant identities,
-  // auto-pick (highest-score live face per sample) is the right behavior and
-  // the picker would just confuse the volunteer.
+  //   A. Layout fragmentation (e.g. Keep_Your_Eyes): ATEM switches between
+  //      full-frame and PiP, so the same pastor shows up at different
+  //      positions/sizes and gets multiple identity ids. → many sig tracks.
+  //   B. Long-gap fragmentation (e.g. sermon-4c10f246): single camera, but
+  //      the pastor steps off-camera for >30 min cumulative across the
+  //      sermon and the gap-window splits him into 2-3 sequential tracks.
+  //      → few sig tracks but they all look the same.
+  //
+  // The picker should ONLY appear when the data shows two genuinely
+  // distinct on-screen appearances (different cx OR different face_h). For
+  // a single-pastor sermon both A and B should hide the picker — auto-pick
+  // (highest-score live face per sample) handles them correctly because it
+  // picks the most prominent face per moment regardless of which track id
+  // happens to own that detection.
   const totalSamples = identities.reduce((a, id) => a + id.n_samples, 0)
   const significantIdentities = identities.filter(
     (id) => totalSamples > 0 && id.n_samples / totalSamples >= 0.1,
   )
+  // "Appearance signature" = (cx bucket, h bucket). If all sig identities
+  // collapse to one bucket they're the same person fragmented; a real
+  // second person on screen lands in a different bucket. Bucket sizes are
+  // generous: cx by 20% of typical frame width, h by 40%.
+  const FRAME_W_GUESS = 1920
+  const significantClusters = new Set(
+    significantIdentities.map((id) => {
+      const cxBucket = Math.round(id.thumb_box.cx / (FRAME_W_GUESS * 0.2))
+      const hBucket = Math.round(Math.log2(Math.max(1, id.thumb_box.h)) * 1.5)
+      return `${cxBucket}:${hBucket}`
+    })
+  )
+  // Combined rule:
+  //   show iff 2-4 significant tracks AND at least 2 distinct appearance
+  //   clusters. The 2-4 cap blocks layout-fragmentation messes (lots of
+  //   same-person tracks in different layouts, e.g. ATEM switching). The
+  //   cluster check blocks long-gap fragmentation (few same-person tracks
+  //   from the pastor stepping off-camera). Both still hide for the rare
+  //   case where one pastor genuinely shows up across many layouts; the
+  //   only proper fix for that is face-embedding re-id, which isn't in v1.
   const showFacePicker =
     identityScanned &&
     significantIdentities.length >= 2 &&
-    significantIdentities.length <= 4
+    significantIdentities.length <= 4 &&
+    significantClusters.size >= 2
 
   const exporting = exportJob && (exportJob.status === 'queued' || exportJob.status === 'running')
   const exportedPath = exportJob?.output_clip_path
