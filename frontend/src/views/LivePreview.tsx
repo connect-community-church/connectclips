@@ -316,7 +316,11 @@ export function LivePreview({
                 key={i}
                 className={`cp-word ${i === currentChunk.wordIdx ? 'current' : ''}`}
               >
-                {w.text}{i < currentChunk.chunk.length - 1 ? ' ' : ''}
+                {/* NBSP, not a regular space: trailing whitespace inside an
+                    `display: inline-block` box gets collapsed at the box
+                    edge, which made captions render as "thatwhereverZion"
+                    with no inter-word gaps. NBSP ( ) is never collapsed. */}
+                {w.text}{i < currentChunk.chunk.length - 1 ? ' ' : ''}
               </span>
             ))}
           </div>
