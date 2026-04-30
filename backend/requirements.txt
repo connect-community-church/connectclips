@@ -1,4 +1,5 @@
 fastapi==0.115.5
+itsdangerous==2.2.0  # signed cookies for SessionMiddleware
 uvicorn[standard]==0.32.1
 pydantic-settings==2.6.1
 python-multipart==0.0.20
@@ -9,4 +10,14 @@ nvidia-cublas-cu12==12.9.2.10
 nvidia-cudnn-cu12==9.21.1.3
 nvidia-cuda-nvrtc-cu12==12.9.86
 yt-dlp==2026.3.17
-anthropic==0.40.0
+anthropic==0.97.0
+# reframing pipeline: face tracking + opencv numpy ops
+mediapipe==0.10.21  # legacy — no longer imported by reframe.py; safe to remove later
+opencv-python-headless
+numpy<2
+# YuNet face detection runs through ONNX Runtime on the GPU (3-4ms/inference vs ~250ms on CPU)
+onnxruntime-gpu==1.25.1
+nvidia-cuda-runtime-cu12
+nvidia-curand-cu12
+nvidia-cufft-cu12
+

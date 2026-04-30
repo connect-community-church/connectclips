@@ -14,9 +14,12 @@ import sys
 from pathlib import Path
 
 _LIBS = [
+    ("nvidia/cuda_runtime/lib", ["libcudart.so.12"]),
     ("nvidia/cublas/lib", ["libcublas.so.12", "libcublasLt.so.12"]),
     ("nvidia/cudnn/lib", ["libcudnn.so.9"]),
     ("nvidia/cuda_nvrtc/lib", ["libnvrtc.so.12"]),
+    ("nvidia/curand/lib", ["libcurand.so.10"]),
+    ("nvidia/cufft/lib", ["libcufft.so.11"]),
 ]
 
 

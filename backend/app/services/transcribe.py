@@ -11,11 +11,16 @@ import datetime as dt
 import json
 from pathlib import Path
 from threading import Lock
+from typing import Callable
 
 from app import cuda_preload  # noqa: F401  # must precede faster_whisper import
 from faster_whisper import WhisperModel
 
 from app.config import settings
+
+# (message, percent in [0, 1]) — same shape as the reframe progress callback,
+# so the runner can reuse one helper to update job rows.
+ProgressCB = Callable[[str, float], None]
 
 _model: WhisperModel | None = None
 _model_lock = Lock()
@@ -33,13 +38,14 @@ def _get_model() -> WhisperModel:
     return _model
 
 
-def transcribe_file(source: Path) -> dict:
+def transcribe_file(source: Path, progress_cb: ProgressCB | None = None) -> dict:
     """Transcribe an audio/video file and return a JSON-serializable transcript.
 
     Blocking. Call from a thread (asyncio.to_thread) when invoked from async code.
     """
     model = _get_model()
     segments_iter, info = model.transcribe(str(source), word_timestamps=True)
+    duration = float(info.duration or 0)
     segments = []
     for i, seg in enumerate(segments_iter):
         segments.append(
@@ -54,6 +60,9 @@ def transcribe_file(source: Path) -> dict:
                 ],
             }
         )
+        if progress_cb is not None and duration > 0:
+            pct = min(1.0, float(seg.end) / duration)
+            progress_cb(f"Transcribing audio ({int(seg.end)}/{int(duration)}s)", pct)
     return {
         "source": source.name,
         "duration": info.duration,
