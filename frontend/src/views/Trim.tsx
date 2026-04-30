@@ -14,10 +14,49 @@ type Props = {
 
 const NUDGE_STEP = 0.1 // seconds
 
+// Time formatting / parsing for the trim inputs. Seconds-with-decimals
+// (235.03) is unambiguous internally but reads as a frame index to a
+// volunteer scrubbing through a sermon. M:SS.cc is the format every
+// timeline-savvy reader recognizes.
+function formatTime(seconds: number): string {
+  const total = Math.max(0, seconds)
+  const m = Math.floor(total / 60)
+  const s = total - m * 60
+  // s.toFixed(2) on values 0-9 produces "0.00"-"9.99"; padStart to "00.00"
+  // shape so single-digit seconds always read as "M:0S.cc".
+  return `${m}:${s.toFixed(2).padStart(5, '0')}`
+}
+
+// Accepts:
+//   "M:SS.cc"  e.g. "3:55.03"
+//   "M:SS"     e.g. "3:55"
+//   "SSS.cc"   e.g. "235.03"  (raw seconds, falls back to numeric parse)
+// Returns null if input doesn't match any of those.
+function parseTime(input: string): number | null {
+  const t = input.trim()
+  if (t === '') return null
+  if (!t.includes(':')) {
+    const n = parseFloat(t)
+    return isFinite(n) ? Math.max(0, n) : null
+  }
+  const m = t.match(/^(\d+):([0-5]?\d)(?:\.(\d{1,3}))?$/)
+  if (!m) return null
+  const mins = parseInt(m[1], 10)
+  const secs = parseInt(m[2], 10)
+  const sub = m[3] ? parseFloat('0.' + m[3]) : 0
+  return mins * 60 + secs + sub
+}
+
 export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [start, setStart] = useState(clip.start)
   const [end, setEnd] = useState(clip.end)
+  // Text-state for the M:SS.cc input fields. We keep these separate from
+  // the numeric start/end so the user can edit freely (typing intermediate
+  // values like "3:" or "3:5") without us snapping back. Parsed on blur /
+  // Enter; reverts to last-good if input is invalid.
+  const [startText, setStartText] = useState(() => formatTime(clip.start))
+  const [endText, setEndText] = useState(() => formatTime(clip.end))
   const [looping, setLooping] = useState(false)
   const [exportJob, setExportJob] = useState<Job | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -77,6 +116,35 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
       v.currentTime = clip.start
     }
   }, [clip.start])
+
+  // Keep the M:SS.cc text in sync with numeric state for any change that
+  // doesn't originate from the input itself (nudge buttons, ⤓ playhead,
+  // initial load). When the user is mid-typing we'd already be racing
+  // their keystrokes, but commitStart/commitEnd reset to the canonical
+  // formatted value on blur, so this is safe.
+  useEffect(() => { setStartText(formatTime(start)) }, [start])
+  useEffect(() => { setEndText(formatTime(end)) }, [end])
+
+  const commitStart = () => {
+    const parsed = parseTime(startText)
+    if (parsed === null) {
+      setStartText(formatTime(start))   // revert
+      return
+    }
+    const next = Math.max(0, Math.min(parsed, end - 0.1))
+    setStart(next)
+    setStartText(formatTime(next))
+  }
+  const commitEnd = () => {
+    const parsed = parseTime(endText)
+    if (parsed === null) {
+      setEndText(formatTime(end))
+      return
+    }
+    const next = Math.max(start + 0.1, parsed)
+    setEnd(next)
+    setEndText(formatTime(next))
+  }
 
   // Loop within [start, end] when looping is on
   useEffect(() => {
@@ -192,10 +260,14 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
             <div className="time-input">
               <label>Start</label>
               <input
-                type="number"
-                step={NUDGE_STEP}
-                value={start.toFixed(2)}
-                onChange={(e) => setStart(parseFloat(e.target.value))}
+                type="text"
+                inputMode="decimal"
+                value={startText}
+                onChange={(e) => setStartText(e.target.value)}
+                onBlur={commitStart}
+                onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                placeholder="M:SS.cc"
+                size={8}
               />
               <button onClick={() => setStart((s) => Math.max(0, s - NUDGE_STEP))}>−0.1s</button>
               <button onClick={() => setStart((s) => s + NUDGE_STEP)}>+0.1s</button>
@@ -205,17 +277,21 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
             <div className="time-input">
               <label>End</label>
               <input
-                type="number"
-                step={NUDGE_STEP}
-                value={end.toFixed(2)}
-                onChange={(e) => setEnd(parseFloat(e.target.value))}
+                type="text"
+                inputMode="decimal"
+                value={endText}
+                onChange={(e) => setEndText(e.target.value)}
+                onBlur={commitEnd}
+                onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                placeholder="M:SS.cc"
+                size={8}
               />
               <button onClick={() => setEnd((s) => Math.max(start + 0.1, s - NUDGE_STEP))}>−0.1s</button>
               <button onClick={() => setEnd((s) => s + NUDGE_STEP)}>+0.1s</button>
               <button onClick={setOutToCurrent} title="Set end to current playhead">⤓ playhead</button>
               <button onClick={() => seekTo(Math.max(0, end - 0.05))} title="Jump video to just before current end">⏭ go</button>
             </div>
-            <div className="duration">Duration: {(end - start).toFixed(2)}s</div>
+            <div className="duration">Duration: {formatTime(end - start)}</div>
             <div className="action-row">
               <button onClick={playRange}>▶ Play range (loop)</button>
               <button
