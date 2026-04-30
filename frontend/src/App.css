@@ -584,12 +584,19 @@ input[type="number"] {
   padding: 4px 0;
   background: transparent;
 }
-/* font-size: inherit MUST be here to override the global `.cp-line` rule
-   used by the dropdown thumbnails (which sets font-size: 13px). Without
-   it, the captions render at 13px regardless of what `.cap-live.style-*`
-   sets on the parent — the global selector matches `.cp-line` directly
-   and wins for that element. */
-.cap-live .cp-line { margin: 0; padding: 0 8px; font-size: inherit; }
+/* `font-size: inherit` AND `color: inherit` MUST both be here to override
+   the global `.cp-line` rule used by the dropdown thumbnails (which sets
+   `font-size: 13px; color: var(--cp-primary, #fff);`). Without these,
+   the inner div takes the dropdown's font/color regardless of what
+   `.cap-live.style-*` sets on the parent — same per-element-matching
+   specificity gotcha hits both properties. Symptom for color: white-
+   block captions had invisible white-on-white non-highlight text. */
+.cap-live .cp-line {
+  margin: 0;
+  padding: 0 8px;
+  font-size: inherit;
+  color: inherit;
+}
 .cap-live .cp-word {
   display: inline-block;
   transition: color 0.1s, transform 0.1s;
