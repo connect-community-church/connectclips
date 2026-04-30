@@ -8,7 +8,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 
 class SPAStaticFiles(StaticFiles):
-    """StaticFiles subclass that sets cache headers appropriate for a Vite SPA:
+    """StaticFiles subclass for a Vite SPA with History-API routing:
 
     - ``index.html`` (the document referenced for /any/route/) must be
       revalidated every load. Vite builds it with content-hashed asset URLs
@@ -17,13 +17,32 @@ class SPAStaticFiles(StaticFiles):
     - Files under ``/assets/`` are content-addressed (filename includes a
       hash of the contents). They're effectively immutable, so we let the
       browser cache them forever.
+    - Deep client-side routes (e.g. ``/sermons/foo.mp4``,
+      ``/sermons/foo.mp4/clip/2``) don't match any real file, so we fall
+      back to ``index.html`` for any 404 inside the SPA mount. The SPA's
+      router then takes over on the client. API and /files mounts are
+      registered before this catch-all so they still win for their paths.
 
-    Result: no more "hard-refresh after every backend restart" tax. A normal
-    page load picks up the new index, which points at new bundles.
+    Result: no "hard-refresh after every backend restart" tax, AND deep
+    links / refresh-on-deep-link work without leaving the SPA at /.
     """
 
     async def get_response(self, path, scope):
-        response = await super().get_response(path, scope)
+        # Starlette's StaticFiles raises HTTPException(404) for missing files
+        # rather than returning a Response with status 404 — catch both cases.
+        from starlette.exceptions import HTTPException as StarletteHTTPException
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404:
+                response = await super().get_response("index.html", scope)
+                response.headers["Cache-Control"] = "no-cache, must-revalidate"
+                return response
+            raise
+        if response.status_code == 404:
+            response = await super().get_response("index.html", scope)
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+            return response
         if path in ("index.html", "."):
             response.headers["Cache-Control"] = "no-cache, must-revalidate"
         elif path.startswith("assets/"):

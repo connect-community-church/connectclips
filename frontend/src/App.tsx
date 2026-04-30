@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import { SermonList } from './views/SermonList'
 import { SermonDetail } from './views/SermonDetail'
@@ -15,6 +15,14 @@ type View =
   | { name: 'trim'; sermon: Sermon; clip: Clip; clipIndex: number }
   | { name: 'history' }
 
+// Parsed-from-URL form. Doesn't carry the full sermon/clip object — those
+// come from the API on hydration.
+type Route =
+  | { name: 'list' }
+  | { name: 'detail'; sermonName: string }
+  | { name: 'trim'; sermonName: string; clipIndex: number }
+  | { name: 'history' }
+
 type Upload = {
   id: string  // client-side; lets the banner key by uploads even if the file
               // server-side job-id isn't fetched yet.
@@ -28,11 +36,60 @@ type Upload = {
 
 const ANON: Me = { login: null, name: null, profile_pic: null, admin: false, anonymous: true }
 
+// History-API routing. The backend serves index.html for any path that
+// isn't under /api or /files (SPAStaticFiles falls back on 404), so deep
+// links survive a refresh and the URL bar shows clean paths instead of
+// `#/sermons/...`. Back/forward buttons fire `popstate`, which we listen
+// to for cross-history hydration.
+function buildPath(view: View): string {
+  switch (view.name) {
+    case 'list':    return '/'
+    case 'history': return '/history'
+    case 'detail':  return `/sermons/${encodeURIComponent(view.sermon.name)}`
+    case 'trim':    return `/sermons/${encodeURIComponent(view.sermon.name)}/clip/${view.clipIndex}`
+  }
+}
+
+function parsePath(pathname: string): Route {
+  if (pathname === '' || pathname === '/') return { name: 'list' }
+  if (pathname === '/history') return { name: 'history' }
+  const trim = pathname.match(/^\/sermons\/([^/]+)\/clip\/(\d+)\/?$/)
+  if (trim) {
+    return { name: 'trim', sermonName: decodeURIComponent(trim[1]), clipIndex: parseInt(trim[2], 10) }
+  }
+  const detail = pathname.match(/^\/sermons\/([^/]+)\/?$/)
+  if (detail) {
+    return { name: 'detail', sermonName: decodeURIComponent(detail[1]) }
+  }
+  return { name: 'list' }
+}
+
+// True iff the route encoded in the URL matches the view we're rendering.
+// We compare so that programmatic `navigate()` (which also updates the hash)
+// doesn't trigger a redundant re-hydrate via the hashchange listener.
+function routeMatchesView(route: Route, view: View): boolean {
+  if (route.name === 'list' && view.name === 'list') return true
+  if (route.name === 'history' && view.name === 'history') return true
+  if (route.name === 'detail' && view.name === 'detail') {
+    return route.sermonName === view.sermon.name
+  }
+  if (route.name === 'trim' && view.name === 'trim') {
+    return route.sermonName === view.sermon.name && route.clipIndex === view.clipIndex
+  }
+  return false
+}
+
 function App() {
   const [view, setView] = useState<View>({ name: 'list' })
   const [me, setMe] = useState<Me>(ANON)
   const [listVersion, setListVersion] = useState(0)
   const [uploads, setUploads] = useState<Upload[]>([])
+  // Set true while we're resolving a non-default URL into a View — we
+  // need to fetch the sermon (and clip, for trim) from the API before we
+  // can render. Without this the user sees a flash of the sermon list
+  // before the hydrated view replaces it.
+  const [hydrating, setHydrating] = useState(() => parsePath(window.location.pathname).name !== 'list')
+  const [hydrateError, setHydrateError] = useState<string | null>(null)
 
   const refreshMe = useCallback(() => {
     api.me().then(setMe).catch(() => setMe(ANON))
@@ -41,6 +98,85 @@ function App() {
   useEffect(() => {
     refreshMe()
   }, [refreshMe])
+
+  // viewRef keeps a stable reference to the current view for use inside the
+  // hashchange listener (which is registered once with [] deps).
+  const viewRef = useRef(view)
+  useEffect(() => { viewRef.current = view }, [view])
+
+  // Resolve a parsed Route → fully hydrated View by fetching the sermon and
+  // (for trim) clip from the API. On miss (sermon deleted, clip index out
+  // of range, network error) falls back to the closest valid view.
+  const hydrateRoute = useCallback(async (route: Route): Promise<View> => {
+    if (route.name === 'list')    return { name: 'list' }
+    if (route.name === 'history') return { name: 'history' }
+
+    const sermons = await api.listSermons()
+    const sermon = sermons.find((s) => s.name === route.sermonName)
+    if (!sermon) {
+      throw new Error(`Sermon not found: ${route.sermonName}`)
+    }
+    if (route.name === 'detail') {
+      return { name: 'detail', sermon }
+    }
+    // trim
+    const clipsFile = await api.getClips(sermon.name)
+    const clip = clipsFile.clips[route.clipIndex]
+    if (!clip) {
+      // Clip index out of range — clips.json was regenerated since the URL
+      // was bookmarked. Drop to the sermon detail so the user can pick again.
+      return { name: 'detail', sermon }
+    }
+    return { name: 'trim', sermon, clip, clipIndex: route.clipIndex }
+  }, [])
+
+  // Mount: read URL, hydrate. Subscribe to popstate so the browser
+  // back/forward buttons actually navigate (otherwise back would change
+  // the URL but leave the view in place).
+  useEffect(() => {
+    let cancelled = false
+    const hydrateFromUrl = async () => {
+      const route = parsePath(window.location.pathname)
+      if (routeMatchesView(route, viewRef.current)) return  // programmatic nav, already in sync
+      setHydrating(true)
+      setHydrateError(null)
+      try {
+        const next = await hydrateRoute(route)
+        if (cancelled) return
+        setView(next)
+        // If hydration fell back (sermon missing, clip OOR), update the
+        // URL to match the actual view so refreshing again is consistent.
+        const expected = buildPath(next)
+        if (expected !== window.location.pathname) {
+          window.history.replaceState(null, '', expected + window.location.search)
+        }
+      } catch (e) {
+        if (cancelled) return
+        setHydrateError(String(e instanceof Error ? e.message : e))
+        setView({ name: 'list' })
+        window.history.replaceState(null, '', '/' + window.location.search)
+      } finally {
+        if (!cancelled) setHydrating(false)
+      }
+    }
+    hydrateFromUrl()
+    const onPopState = () => hydrateFromUrl()
+    window.addEventListener('popstate', onPopState)
+    return () => {
+      cancelled = true
+      window.removeEventListener('popstate', onPopState)
+    }
+  }, [hydrateRoute])
+
+  // navigate(): the only way to change views. Updates state synchronously,
+  // then pushes a new history entry if the target path differs from the
+  // current one (so back/forward retraces the user's navigation).
+  const navigate = useCallback((next: View) => {
+    setView(next)
+    const target = buildPath(next)
+    if (target === window.location.pathname) return
+    window.history.pushState(null, '', target + window.location.search)
+  }, [])
 
   const refreshSermon = async (name: string): Promise<Sermon | null> => {
     const list = await api.listSermons()
@@ -139,7 +275,7 @@ function App() {
         )}
         {/* History: admin-only — shows last 200 actions across all users */}
         {me.admin && view.name !== 'history' && (
-          <button className="secondary" onClick={() => setView({ name: 'history' })}>
+          <button className="secondary" onClick={() => navigate({ name: 'history' })}>
             Activity
           </button>
         )}
@@ -175,43 +311,54 @@ function App() {
       ))}
 
       <main>
-        {view.name === 'list' && (
-          <SermonList
-            key={listVersion}
-            admin={me.admin}
-            onOpen={(s) => setView({ name: 'detail', sermon: s })}
-            onDeleted={() => setListVersion((v) => v + 1)}
-            onUpload={startUpload}
-            uploadActive={uploads.some((u) => u.status === 'uploading')}
-          />
+        {hydrateError && (
+          <div className="error" style={{ marginBottom: 12 }}>
+            Couldn't open that link: {hydrateError}
+          </div>
         )}
-        {view.name === 'detail' && (
-          <SermonDetail
-            sermon={view.sermon}
-            admin={me.admin}
-            onBack={() => setView({ name: 'list' })}
-            onTrim={(clip, clipIndex) =>
-              setView({ name: 'trim', sermon: view.sermon, clip, clipIndex })
-            }
-            onDeleted={() => {
-              setListVersion((v) => v + 1)
-              setView({ name: 'list' })
-            }}
-          />
-        )}
-        {view.name === 'trim' && (
-          <Trim
-            sermon={view.sermon}
-            clip={view.clip}
-            clipIndex={view.clipIndex}
-            onBack={async () => {
-              const updated = await refreshSermon(view.sermon.name)
-              setView({ name: 'detail', sermon: updated ?? view.sermon })
-            }}
-          />
-        )}
-        {view.name === 'history' && (
-          <History onBack={() => setView({ name: 'list' })} />
+        {hydrating ? (
+          <div className="muted" style={{ padding: 24 }}>Loading…</div>
+        ) : (
+          <>
+            {view.name === 'list' && (
+              <SermonList
+                key={listVersion}
+                admin={me.admin}
+                onOpen={(s) => navigate({ name: 'detail', sermon: s })}
+                onDeleted={() => setListVersion((v) => v + 1)}
+                onUpload={startUpload}
+                uploadActive={uploads.some((u) => u.status === 'uploading')}
+              />
+            )}
+            {view.name === 'detail' && (
+              <SermonDetail
+                sermon={view.sermon}
+                admin={me.admin}
+                onBack={() => navigate({ name: 'list' })}
+                onTrim={(clip, clipIndex) =>
+                  navigate({ name: 'trim', sermon: view.sermon, clip, clipIndex })
+                }
+                onDeleted={() => {
+                  setListVersion((v) => v + 1)
+                  navigate({ name: 'list' })
+                }}
+              />
+            )}
+            {view.name === 'trim' && (
+              <Trim
+                sermon={view.sermon}
+                clip={view.clip}
+                clipIndex={view.clipIndex}
+                onBack={async () => {
+                  const updated = await refreshSermon(view.sermon.name)
+                  navigate({ name: 'detail', sermon: updated ?? view.sermon })
+                }}
+              />
+            )}
+            {view.name === 'history' && (
+              <History onBack={() => navigate({ name: 'list' })} />
+            )}
+          </>
         )}
       </main>
     </div>
