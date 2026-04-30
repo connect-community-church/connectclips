@@ -36,13 +36,31 @@ header {
   border-bottom: 1px solid var(--border);
   margin-bottom: 16px;
 }
+/* Logo wrapper is a button (clickable home link). Strip the default
+   button chrome so it visually reads as a plain image, but keep
+   :focus-visible and :hover affordances for keyboard / mouse cues. */
+header .logo-button {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+  border-radius: 8px;
+  display: inline-flex;
+}
+header .logo-button:hover { opacity: 0.85; }
+header .logo-button:focus-visible {
+  outline: 2px solid var(--accent, #4f9eff);
+  outline-offset: 2px;
+}
 header .logo {
   height: 56px;
   width: auto;
-  background: white;
-  border-radius: 8px;
-  padding: 4px 10px;
-  flex-shrink: 0;
+  /* New logo has a transparent background and dark navy text — no white
+     plate or padding needed (the previous logo had photo content that
+     needed isolation from the dark theme). */
+  display: block;
 }
 header .title {
   display: flex;

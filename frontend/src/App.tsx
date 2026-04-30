@@ -6,7 +6,7 @@ import { Trim } from './views/Trim'
 import { AdminControls } from './views/AdminControls'
 import { History } from './views/History'
 import type { Clip, Me, Sermon } from './types'
-import logo from './assets/ccchlogo.png'
+import logo from './assets/connectclips-logo.png'
 import './App.css'
 
 type View =
@@ -261,9 +261,19 @@ function App() {
   return (
     <div className="app">
       <header>
-        <img src={logo} alt="Connect Community Church Hamilton" className="logo" />
+        {/* Logo doubles as the home button — clicking it always returns to
+            the sermon list. `<button>` keeps it keyboard-accessible; CSS
+            strips the button chrome so it reads as a plain image. */}
+        <button
+          type="button"
+          className="logo-button"
+          onClick={() => navigate({ name: 'list' })}
+          title="Back to sermon list"
+          aria-label="ConnectClips home"
+        >
+          <img src={logo} alt="ConnectClips" className="logo" />
+        </button>
         <div className="title">
-          <strong>ConnectClips</strong>
           <span className="muted">sermon → vertical clips</span>
         </div>
         <div className="header-spacer" />
