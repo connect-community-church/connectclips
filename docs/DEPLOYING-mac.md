@@ -71,17 +71,33 @@ installer prints them).
 ## 3. System packages
 
 ```bash
-brew install python@3.12 node ffmpeg yt-dlp git
+brew install python@3.12 node ffmpeg-full yt-dlp git expat
+brew link --overwrite --force ffmpeg-full
 ```
 
-Verify ffmpeg has VideoToolbox (Apple's hardware encoder):
+Two non-obvious things in that line, both load-bearing:
+
+- **`ffmpeg-full`, not plain `ffmpeg`.** The default `ffmpeg` formula on
+  Tahoe ships without `libass`, so the `subtitles=…` filter the export
+  pipeline relies on for caption burn-in is missing entirely. Exports
+  fail with `BrokenPipeError` and no helpful hint. `ffmpeg-full`
+  pulls in libass, libfreetype, fontconfig, and ~40 other deps. It's
+  keg-only by default, hence the explicit `brew link --force`.
+- **`expat`** is needed because brew's `python@3.12` bottle on Tahoe is
+  compiled against a newer libexpat than the OS ships, and we patch
+  `pyexpat` to load brew's expat instead in step 5. Without `expat`
+  installed first, that patch has nothing to point at.
+
+Verify ffmpeg has both VideoToolbox (Apple's hardware encoder) and the
+subtitles filter (libass):
 
 ```bash
 ffmpeg -hide_banner -encoders | grep videotoolbox
+ffmpeg -hide_banner -h filter=subtitles | head -3
 ```
 
-You should see `h264_videotoolbox`. Homebrew's ffmpeg ships with it
-enabled by default.
+You should see `h264_videotoolbox`, and the subtitles help text instead
+of `Unknown filter 'subtitles'`.
 
 ---
 
@@ -97,7 +113,31 @@ cd ConnectClips
 
 ## 5. Backend setup
 
-### 5a. Create the venv and install Python dependencies
+### 5a. Patch brew's `python@3.12` for Tahoe's libexpat ABI
+
+Skip this if `python3.12 -m ensurepip --version` runs cleanly. On
+Tahoe 26.x with brew bottle `python@3.12 3.12.13_2`, it errors with
+
+```
+ImportError: dlopen(.../pyexpat.cpython-312-darwin.so):
+Symbol not found: _XML_SetAllocTrackerActivationThreshold
+```
+
+The brew bottle was built against expat 2.7+, but the libexpat that
+ships in Tahoe's dyld shared cache is older. Repoint pyexpat at brew's
+expat (which we installed in step 3):
+
+```bash
+PYEXPAT="$(brew --prefix python@3.12)/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/pyexpat.cpython-312-darwin.so"
+install_name_tool -change /usr/lib/libexpat.1.dylib /opt/homebrew/opt/expat/lib/libexpat.1.dylib "$PYEXPAT"
+codesign --force --sign - "$PYEXPAT"
+```
+
+Verify: `python3.12 -c 'from pyexpat import *; print("ok")'` should
+print `ok`. **This patch is reverted by `brew upgrade python@3.12`** —
+re-run it after any python upgrade until brew ships a fixed bottle.
+
+### 5b. Create the venv and install Python dependencies
 
 ```bash
 cd ~/ConnectClips/backend
@@ -113,7 +153,7 @@ that exist for Linux are silently skipped on macOS, and `pywhispercpp`
 their place. Expect 5-10 minutes — `pywhispercpp` compiles whisper.cpp
 from source on first install.
 
-### 5b. Pre-fetch the YuNet face-detection model
+### 5c. Pre-fetch the YuNet face-detection model
 
 ```bash
 mkdir -p ~/.cache/connectclips
@@ -123,7 +163,7 @@ curl -L -o ~/.cache/connectclips/face_detection_yunet_2023mar.onnx \
 
 228 KB. Same model as the Linux deployment.
 
-### 5c. Configure environment
+### 5d. Configure environment
 
 ```bash
 cp .env.example .env
@@ -407,7 +447,14 @@ rebuild.
 
 **`/api/health` reports `h264_encoder: "libx264"` instead of
 `h264_videotoolbox`** — your ffmpeg build doesn't include VideoToolbox.
-Reinstall via Homebrew: `brew reinstall ffmpeg`.
+Reinstall via Homebrew: `brew reinstall ffmpeg-full`.
+
+**Export fails with `BrokenPipeError: [Errno 32] Broken pipe`** —
+almost certainly your `ffmpeg` is the regular brew formula instead of
+`ffmpeg-full`, so the `subtitles=…` filter (which needs libass) doesn't
+exist. Confirm with `ffmpeg -h filter=subtitles`; if you see "Unknown
+filter", run `brew remove ffmpeg && brew install ffmpeg-full && brew
+link --overwrite --force ffmpeg-full` and restart the service.
 
 **`cuda_available: true` on macOS** — shouldn't happen; the platform
 helper short-circuits CUDA detection on Darwin. If it does, it's

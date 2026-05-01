@@ -178,61 +178,95 @@ def _get_whispercpp_model():
     return _whispercpp_model
 
 
+def _probe_duration(source: Path) -> float:
+    """Return media duration in seconds via PyAV (already a faster-whisper dep)."""
+    import av  # local import: only needed on the whispercpp path
+    try:
+        with av.open(str(source)) as container:
+            if container.duration:
+                return float(container.duration) / 1_000_000.0  # av reports microseconds
+    except Exception:
+        pass
+    return 0.0
+
+
 def _transcribe_whispercpp(source: Path, progress_cb: ProgressCB | None) -> dict:
     model = _get_whispercpp_model()
-    # word_timestamps=True asks whisper.cpp to record per-token timing,
-    # which we map to word-level entries below.
-    segments = model.transcribe(
-        str(source),
-        word_timestamps=True,
-        language="auto",
-    )
 
-    out_segments: list[dict] = []
-    duration = 0.0
+    duration = _probe_duration(source)
     last_pct_emit = -1.0
 
-    for i, seg in enumerate(segments):
-        # whisper.cpp returns timestamps in centiseconds (1/100 sec).
-        seg_start = float(seg.t0) / 100.0
-        seg_end = float(seg.t1) / 100.0
-        words: list[dict] = []
-        for tok in (getattr(seg, "tokens", None) or []):
-            text = getattr(tok, "text", None) or ""
-            # Skip whisper's special / control tokens (<|en|>, <|endoftext|>, etc.).
-            if not text or text.startswith("<|"):
-                continue
-            words.append({
-                "word": text,
-                "start": float(tok.t0) / 100.0,
-                "end": float(tok.t1) / 100.0,
-            })
-        out_segments.append({
-            "id": i,
-            "start": seg_start,
-            "end": seg_end,
-            "text": getattr(seg, "text", ""),
-            "words": words,
-        })
-        duration = max(duration, seg_end)
-        # Throttle progress updates: emit on every ~5% jump to avoid
-        # hammering SQLite.
-        if progress_cb is not None and duration > 0:
-            pct = min(1.0, seg_end / duration if duration > 0 else 0.0)
-            if pct >= last_pct_emit + 0.05 or pct >= 1.0:
-                progress_cb(f"Transcribing audio ({int(seg_end)}/{int(duration)}s)", pct)
-                last_pct_emit = pct
+    def _on_new_segment(seg) -> None:
+        # Fires per emitted Segment during transcription. With max_len=1 +
+        # split_on_word=True that's once per word — throttle to every ~5%.
+        nonlocal last_pct_emit
+        if progress_cb is None or duration <= 0:
+            return
+        seg_end_s = float(seg[-1].t1) / 100.0 if isinstance(seg, list) else float(seg.t1) / 100.0
+        pct = min(1.0, seg_end_s / duration)
+        if pct >= last_pct_emit + 0.05:
+            progress_cb(f"Transcribing audio ({int(seg_end_s)}/{int(duration)}s)", pct)
+            last_pct_emit = pct
 
-    # whisper.cpp doesn't expose a confidence-style language probability
-    # the way faster-whisper does. Best effort: use the detected language
-    # if pywhispercpp surfaces it; otherwise None.
-    language = getattr(model, "context", None)
-    language = getattr(language, "language", None) if language else None
+    # token_timestamps + max_len=1 + split_on_word makes whisper.cpp emit
+    # one Segment per word, with t0/t1 marking the word's audio range.
+    # language="" is whisper.cpp's autodetect sentinel — "auto" trips a
+    # "unknown language" warning before falling back to the same behaviour.
+    word_segments = model.transcribe(
+        str(source),
+        token_timestamps=True,
+        max_len=1,
+        split_on_word=True,
+        language="",
+        new_segment_callback=_on_new_segment,
+    )
+
+    # Re-assemble per-word Segments into sentence-like groups so the
+    # downstream LLM gets readable prose, not one word per line.
+    out_segments: list[dict] = []
+    cur_words: list[dict] = []
+    cur_start: float | None = None
+
+    def _flush() -> None:
+        if not cur_words:
+            return
+        out_segments.append({
+            "id": len(out_segments),
+            "start": cur_start,
+            "end": cur_words[-1]["end"],
+            "text": " ".join(w["word"] for w in cur_words),
+            "words": list(cur_words),
+        })
+
+    for seg in word_segments:
+        # pywhispercpp strips per-word whitespace, so "We are back" arrives
+        # as separate tokens "We"/"are"/"back" — we re-insert spaces below.
+        word = (getattr(seg, "text", "") or "").strip()
+        if not word or word.startswith("<|") or (word.startswith("[") and word.endswith("]")):
+            continue
+        word_start = float(seg.t0) / 100.0
+        word_end = float(seg.t1) / 100.0
+        if cur_start is None:
+            cur_start = word_start
+        cur_words.append({"word": word, "start": word_start, "end": word_end})
+        # Close on terminal punctuation, long silence, or 30-word cap.
+        too_long = len(cur_words) >= 30
+        ends_sentence = word.endswith((".", "?", "!"))
+        if ends_sentence or too_long:
+            _flush()
+            cur_words = []
+            cur_start = None
+
+    _flush()
+
+    # Final progress nudge in case the throttled callback didn't reach 1.0.
+    if progress_cb is not None and duration > 0 and last_pct_emit < 1.0:
+        progress_cb(f"Transcribing audio ({int(duration)}/{int(duration)}s)", 1.0)
 
     return {
         "source": source.name,
         "duration": duration,
-        "language": language,
+        "language": None,
         "language_probability": None,
         "model": settings.whisper_model,
         "backend": "whispercpp",

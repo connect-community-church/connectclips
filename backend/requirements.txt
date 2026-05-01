@@ -31,5 +31,5 @@ onnxruntime==1.25.1                  ; sys_platform == 'darwin'
 # (needs Xcode Command Line Tools). Provides Metal-accelerated transcription
 # that closes most of the gap with NVIDIA + faster-whisper. On Linux we
 # stick with faster-whisper, so this isn't installed there.
-pywhispercpp==1.3.4                  ; sys_platform == 'darwin'
+pywhispercpp==1.3.3                  ; sys_platform == 'darwin'
 
