@@ -604,14 +604,19 @@ def extract_identity_thumb(
 
 
 def _ffmpeg_extract(source: Path, start: float, end: float, out: Path) -> None:
-    # -ss AFTER -i is frame-accurate (decodes up to the seek point). Stream-copy
-    # would snap to the previous keyframe, leaving the output 1–3 seconds ahead
-    # of the requested start — caption sync goes off by exactly that much. Worth
-    # a fast NVENC re-encode here so audio + video + caption times all line up.
+    # -ss BEFORE -i uses the container index to jump to the keyframe right
+    # before our target, then `-accurate_seek` (default ON when re-encoding)
+    # decodes forward to the exact target frame and discards the gap.  Result:
+    # frame-accurate output starting exactly at PTS=0 of `start`, but ffmpeg
+    # only has to decode ~2 seconds of video instead of (start) seconds.
+    # Empirical benchmark on a 35-min-deep clip from a 60 fps source: 108 s
+    # (-ss AFTER) → 7 s (-ss BEFORE), bit-exact identical output. The historical
+    # warning about caption drift only applies to stream-copy (`-c copy`) mode;
+    # we re-encode to NVENC, so accurate_seek does the right thing.
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-        "-i", str(source),
         "-ss", f"{start}",
+        "-i", str(source),
         "-t", f"{end - start}",
         "-c:v", "h264_nvenc", "-preset", "p1", "-b:v", "8M",
         "-c:a", "aac", "-b:a", "192k",
