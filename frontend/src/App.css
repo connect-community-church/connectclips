@@ -23,53 +23,95 @@ body, html, #root {
 }
 
 .app {
-  max-width: 960px;
+  /* Fluid up to 1400 px — picks up most of the horizontal real estate
+     on a 1920-wide laptop/desktop while still leaving small side
+     margins. Below 1400 the layout naturally tracks the viewport. */
+  max-width: 1400px;
   margin: 0 auto;
-  padding: 16px;
+  padding: 16px 24px;
 }
 
-header {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding-bottom: 12px;
+/* Full-viewport-width banner across the top of the page. The banner
+   image is the BACKGROUND, set inline by App.tsx so Vite can resolve
+   the hashed asset path. `cover` stretches it edge-to-edge; the bar's
+   white background fills any letterboxed area that the image doesn't
+   reach. UI controls sit on the right side at the bottom of the bar,
+   over the banner's empty white right zone. */
+.banner-bar {
+  width: 100%;
+  height: 280px;
+  background-color: #ffffff;
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: center;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 16px;
+  position: relative;
+  display: flex;
+  /* Bottom-align so the controls cluster sits at the base of the
+     banner (near the dark page below) rather than floating in the
+     middle of the white right zone. */
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 0 24px 16px;
+  gap: 12px;
+  flex-wrap: nowrap;
 }
-/* Logo wrapper is a button (clickable home link). Strip the default
-   button chrome so it visually reads as a plain image, but keep
-   :focus-visible and :hover affordances for keyboard / mouse cues. */
-header .logo-button {
+/* Invisible button covering the banner-image area. Clicking anywhere
+   over the artwork goes home. The controls cluster sits ABOVE this
+   via z-index so their clicks land first. Explicit no-op hover keeps
+   the global `button:hover { background: #2a323d }` from painting a
+   dark grey overlay across the banner artwork on hover. */
+.banner-home-zone {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 75%;
   background: transparent;
   border: none;
+  cursor: pointer;
   padding: 0;
   margin: 0;
-  cursor: pointer;
-  flex-shrink: 0;
-  border-radius: 8px;
-  display: inline-flex;
 }
-header .logo-button:hover { opacity: 0.85; }
-header .logo-button:focus-visible {
+.banner-home-zone:hover,
+.banner-home-zone:focus { background: transparent; }
+.banner-home-zone:focus-visible {
   outline: 2px solid var(--accent, #4f9eff);
-  outline-offset: 2px;
+  outline-offset: -3px;
 }
-header .logo {
-  height: 56px;
-  width: auto;
-  /* New logo has a transparent background and dark navy text — no white
-     plate or padding needed (the previous logo had photo content that
-     needed isolation from the dark theme). */
-  display: block;
-}
-header .title {
+/* Controls cluster on the right side of the banner. Selectors are
+   intentionally specific — `.banner-bar .banner-controls button` beats
+   the global `button.secondary { background: transparent }` so Activity
+   / Exit buttons read on the white background instead of vanishing. */
+.banner-controls {
+  position: relative;
+  z-index: 1;
   display: flex;
-  flex-direction: column;
-  line-height: 1.2;
+  align-items: center;
+  gap: 12px;
+  font-size: 15px;
 }
-header .title strong { font-size: 18px; }
-header .title .muted { font-size: 13px; }
-header .header-spacer { flex: 1; }
+.banner-bar .banner-controls .identity-badge,
+.banner-bar .banner-controls .identity-badge strong {
+  color: #1a2940;
+  font-size: 15px;
+}
+.banner-bar .banner-controls button,
+.banner-bar .banner-controls button.secondary {
+  background: #1a2940;
+  color: #ffffff;
+  border: 1px solid #1a2940;
+  font-size: 15px;
+  padding: 8px 14px;
+}
+.banner-bar .banner-controls button:hover,
+.banner-bar .banner-controls button.secondary:hover {
+  background: #2a3a55;
+}
+.banner-bar .banner-controls .badge.admin {
+  font-size: 14px;
+  padding: 4px 10px;
+}
 
 .identity-badge {
   font-size: 13px;

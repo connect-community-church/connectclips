@@ -6,7 +6,7 @@ import { Trim } from './views/Trim'
 import { AdminControls } from './views/AdminControls'
 import { History } from './views/History'
 import type { Clip, Me, Sermon } from './types'
-import logo from './assets/connectclips-logo.png'
+import logo from './assets/connectclips-banner.png'
 import './App.css'
 
 type View =
@@ -259,39 +259,43 @@ function App() {
   }, [])
 
   return (
-    <div className="app">
-      <header>
-        {/* Logo doubles as the home button — clicking it always returns to
-            the sermon list. `<button>` keeps it keyboard-accessible; CSS
-            strips the button chrome so it reads as a plain image. */}
+    <>
+      {/* Full-viewport-width banner. The banner image is the BACKGROUND
+          of this strip (set inline so Vite resolves the imported asset
+          URL). The home-link button overlays the banner-image area on
+          the left ~75 %; UI controls sit on the right side, above the
+          empty white right zone of the banner. The banner-bar lives
+          OUTSIDE .app so it spans the full viewport instead of being
+          capped by the .app max-width. */}
+      <div
+        className="banner-bar"
+        style={{ backgroundImage: `url(${logo})` }}
+      >
         <button
           type="button"
-          className="logo-button"
+          className="banner-home-zone"
           onClick={() => navigate({ name: 'list' })}
           title="Back to sermon list"
           aria-label="ConnectClips home"
-        >
-          <img src={logo} alt="ConnectClips" className="logo" />
-        </button>
-        <div className="title">
-          <span className="muted">sermon → vertical clips</span>
+        />
+        <div className="banner-controls">
+          {/* Identity badge — shows when Tailscale Serve forwarded the request */}
+          {!me.anonymous && (
+            <div className="identity-badge" title={me.login ?? ''}>
+              Hi, <strong>{me.name || me.login}</strong>
+            </div>
+          )}
+          {/* History: admin-only — shows last 200 actions across all users */}
+          {me.admin && view.name !== 'history' && (
+            <button className="secondary" onClick={() => navigate({ name: 'history' })}>
+              Activity
+            </button>
+          )}
+          {/* Admin: pre-authorized via Tailscale identity, or unlock via password */}
+          <AdminControls admin={me.admin} identityAdmin={!me.anonymous && me.admin} onChange={refreshMe} />
         </div>
-        <div className="header-spacer" />
-        {/* Identity badge — shows when Tailscale Serve forwarded the request */}
-        {!me.anonymous && (
-          <div className="identity-badge" title={me.login ?? ''}>
-            Hi, <strong>{me.name || me.login}</strong>
-          </div>
-        )}
-        {/* History: admin-only — shows last 200 actions across all users */}
-        {me.admin && view.name !== 'history' && (
-          <button className="secondary" onClick={() => navigate({ name: 'history' })}>
-            Activity
-          </button>
-        )}
-        {/* Admin: pre-authorized via Tailscale identity, or unlock via password */}
-        <AdminControls admin={me.admin} identityAdmin={!me.anonymous && me.admin} onChange={refreshMe} />
-      </header>
+      </div>
+    <div className="app">
 
       {/* App-global upload banners — one row per active/recent upload, persists across view navigation */}
       {uploads.map((u) => (
@@ -372,6 +376,7 @@ function App() {
         )}
       </main>
     </div>
+    </>
   )
 }
 
