@@ -5,19 +5,31 @@ pydantic-settings==2.6.1
 python-multipart==0.0.20
 faster-whisper==1.1.0
 requests==2.33.1
-# CUDA runtime libs for ctranslate2 (faster-whisper backend) — preloaded by app.cuda_preload
-nvidia-cublas-cu12==12.9.2.10
-nvidia-cudnn-cu12==9.21.1.3
-nvidia-cuda-nvrtc-cu12==12.9.86
 yt-dlp==2026.3.17
 anthropic==0.97.0
-# reframing pipeline: face tracking + opencv numpy ops
-mediapipe==0.10.21  # legacy — no longer imported by reframe.py; safe to remove later
 opencv-python-headless
 numpy<2
-# YuNet face detection runs through ONNX Runtime on the GPU (3-4ms/inference vs ~250ms on CPU)
-onnxruntime-gpu==1.25.1
-nvidia-cuda-runtime-cu12
-nvidia-curand-cu12
-nvidia-cufft-cu12
+
+# CUDA runtime libs for ctranslate2 (faster-whisper backend on Linux+NVIDIA).
+# Preloaded by app.cuda_preload at import time. Skipped on macOS — Mac
+# uses the whispercpp backend instead, which doesn't need these.
+nvidia-cublas-cu12==12.9.2.10        ; sys_platform == 'linux'
+nvidia-cudnn-cu12==9.21.1.3          ; sys_platform == 'linux'
+nvidia-cuda-nvrtc-cu12==12.9.86      ; sys_platform == 'linux'
+nvidia-cuda-runtime-cu12             ; sys_platform == 'linux'
+nvidia-curand-cu12                   ; sys_platform == 'linux'
+nvidia-cufft-cu12                    ; sys_platform == 'linux'
+
+# YuNet face detection through ONNX Runtime. The -gpu wheel on Linux
+# carries CUDA support but falls back to CPUExecutionProvider cleanly
+# if there's no driver, so it's safe even on a CPU-only Linux box.
+# macOS gets the standard onnxruntime build with CoreML support.
+onnxruntime-gpu==1.25.1              ; sys_platform == 'linux'
+onnxruntime==1.25.1                  ; sys_platform == 'darwin'
+
+# whisper.cpp + Metal on Apple Silicon. Compiles from source on install
+# (needs Xcode Command Line Tools). Provides Metal-accelerated transcription
+# that closes most of the gap with NVIDIA + faster-whisper. On Linux we
+# stick with faster-whisper, so this isn't installed there.
+pywhispercpp==1.3.4                  ; sys_platform == 'darwin'
 
