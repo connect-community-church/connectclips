@@ -43,8 +43,11 @@ if not ADMIN_PW:
 def capture_identity_pass(p):
     """Screenshots 01-08, 10, 11 — viewer is signed in via Tailscale identity."""
     browser = p.chromium.launch(headless=True)
+    # Viewport bumped from 1366×900 to 1440×1080 because the new banner-bar
+    # eats 280 px at the top — at 900 tall there's barely room for the
+    # sermon list to show meaningful content below the banner.
     ctx = browser.new_context(
-        viewport={"width": 1366, "height": 900},
+        viewport={"width": 1440, "height": 1080},
         extra_http_headers=TS_HEADERS,
     )
     page = ctx.new_page()
@@ -141,7 +144,7 @@ def capture_anonymous_pass(p):
         print("  09-admin-prompt.png SKIPPED (no admin password)")
         return
     browser = p.chromium.launch(headless=True)
-    ctx = browser.new_context(viewport={"width": 1366, "height": 900})
+    ctx = browser.new_context(viewport={"width": 1440, "height": 1080})
     page = ctx.new_page()
     page.goto(BASE)
     page.wait_for_selector(".sermon-list")
@@ -149,7 +152,9 @@ def capture_anonymous_pass(p):
 
     page.locator("button:has-text('Enter admin mode')").click()
     page.wait_for_selector(".admin-prompt input[type='password']")
-    page.locator("header").screenshot(path=str(OUT / "09-admin-prompt.png"))
+    # The old `<header>` was replaced with a full-width `.banner-bar` that
+    # spans the top of the page; the admin prompt now lives inside it.
+    page.locator(".banner-bar").screenshot(path=str(OUT / "09-admin-prompt.png"))
     print("  09-admin-prompt.png")
 
     browser.close()
