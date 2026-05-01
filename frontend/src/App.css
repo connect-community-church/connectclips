@@ -319,6 +319,25 @@ input[type="number"] {
 .hook-score.med  { background: var(--warn); }
 .hook-score.low  { background: var(--err); color: var(--fg); }
 
+/* Larger pill used on the trim page next to the clip title — sized so
+   the score is visible at a glance while the volunteer's working on
+   the clip, without dwarfing the title. */
+.hook-score.large {
+  font-size: 20px;
+  padding: 6px 14px;
+  min-width: 48px;
+  border-radius: 16px;
+  margin-right: 12px;
+  vertical-align: middle;
+  line-height: 1;
+}
+.trim-title {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-wrap: wrap;
+}
+
 /* Trim */
 .trim h2 { margin-bottom: 4px; }
 .player-row {
