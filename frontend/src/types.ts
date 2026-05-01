@@ -100,9 +100,29 @@ export type UsageSummary = {
   total_estimated_cost_usd: number
 }
 
+export type Topup = {
+  id: number
+  amount_usd: number
+  note: string | null
+  created_at: string
+}
+
+export type Balance = {
+  total_topups_usd: number
+  total_spent_since_first_topup_usd: number
+  estimated_balance_usd: number
+  low_threshold_usd: number
+  is_low: boolean
+  first_topup_at: string
+  topups: Topup[]
+}
+
 export type UsageResponse = {
   rows: UsageRow[]
   summary: UsageSummary
+  // null until the admin records their first top-up — the UI shows a
+  // CTA to log a top-up instead of a meaningless balance number.
+  balance: Balance | null
 }
 
 export type Job = {

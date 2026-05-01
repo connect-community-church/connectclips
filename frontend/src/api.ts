@@ -33,6 +33,13 @@ export const api = {
 
   // Anthropic API usage / cost summary (admin-only).
   getUsage: () => jsonFetch<UsageResponse>('/usage'),
+  addTopup: (amount_usd: number, note?: string, created_at?: string) =>
+    jsonFetch<{ id: number; amount_usd: number; note: string | null; created_at: string }>(
+      '/usage/topups',
+      { method: 'POST', body: JSON.stringify({ amount_usd, note, created_at }) },
+    ),
+  deleteTopup: (id: number) =>
+    jsonFetch<{ id: number; deleted: boolean }>(`/usage/topups/${id}`, { method: 'DELETE' }),
 
   startTranscribe: (source: string) =>
     jsonFetch<Job>('/jobs', { method: 'POST', body: JSON.stringify({ source }) }),

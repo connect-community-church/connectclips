@@ -88,6 +88,18 @@ def init() -> None:
         c.execute("CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs (created_at DESC)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_jobs_source     ON jobs (source)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_jobs_kind_clip  ON jobs (source, clip_index, kind, status)")
+        # Anthropic API balance tracking — admin records each manual top-up
+        # (Anthropic doesn't expose a balance endpoint; we estimate by
+        # subtracting our local cost calc from the sum of recorded top-ups).
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS balance_topups (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                amount_usd  REAL NOT NULL,
+                note        TEXT,
+                created_at  TEXT NOT NULL
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_topups_created ON balance_topups (created_at DESC)")
 
 
 @contextmanager

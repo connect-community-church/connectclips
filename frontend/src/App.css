@@ -852,6 +852,138 @@ input[type="number"] {
 }
 .usage-table td:last-child { font-weight: 600; }
 .usage .muted.small { font-size: 12px; }
+
+/* Balance card — first thing on the Usage page. Goes red when the
+   estimated balance falls below the threshold. */
+.balance-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 22px;
+  margin: 16px 0 12px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 24px;
+}
+.balance-card.low {
+  background: rgba(248,81,73,0.08);
+  border-color: rgba(248,81,73,0.55);
+}
+.balance-main { min-width: 180px; }
+.balance-label {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.balance-value {
+  font-size: 36px;
+  font-weight: 700;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.balance-card.low .balance-value { color: var(--err); }
+.balance-warning {
+  margin-top: 4px;
+  color: var(--err);
+  font-size: 13px;
+  font-weight: 600;
+}
+.balance-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+}
+.balance-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+.balance-link {
+  display: inline-block;
+  background: var(--accent);
+  color: white;
+  padding: 8px 14px;
+  border-radius: 6px;
+  text-decoration: none;
+  font-size: 14px;
+  text-align: center;
+}
+.balance-link:hover { background: var(--accent-2); }
+.balance-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.balance-empty-title { font-size: 18px; font-weight: 600; }
+.balance-empty .balance-actions { flex-direction: row; }
+
+/* Log-top-up form — inline panel that shows when the admin clicks
+   "Log a top-up". Two fields side-by-side on wide viewports. */
+.topup-form {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.topup-form-row {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.topup-form label {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  color: var(--muted);
+}
+.topup-form input {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 14px;
+  margin-top: 4px;
+}
+.topup-form-actions { display: flex; gap: 8px; }
+@media (max-width: 700px) {
+  .topup-form-row { grid-template-columns: 1fr; }
+  .balance-card { grid-template-columns: 1fr; gap: 12px; }
+  .balance-empty .balance-actions { flex-direction: column; }
+}
+
+/* Top-up history — collapsible. */
+.topup-history { margin: 12px 0 18px; }
+.topup-history summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 6px 0;
+  user-select: none;
+}
+.topup-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  margin-top: 6px;
+}
+.topup-table th, .topup-table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.topup-table th { color: var(--muted); font-weight: 500; }
+.topup-table th.num, .topup-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+button.small { padding: 4px 8px; font-size: 12px; }
 .status-pill {
   display: inline-block;
   padding: 2px 8px;
