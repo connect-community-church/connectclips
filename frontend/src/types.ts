@@ -80,6 +80,31 @@ export type ClipsFile = {
 
 export type JobStatus = 'queued' | 'running' | 'done' | 'failed'
 
+export type UsageRow = {
+  source: string
+  model: string | null
+  created_at: string | null
+  input_tokens: number
+  output_tokens: number
+  cache_creation_input_tokens: number
+  cache_read_input_tokens: number
+  estimated_cost_usd: number
+}
+
+export type UsageSummary = {
+  n_clip_selections: number
+  total_input_tokens: number
+  total_output_tokens: number
+  total_cache_creation_input_tokens: number
+  total_cache_read_input_tokens: number
+  total_estimated_cost_usd: number
+}
+
+export type UsageResponse = {
+  rows: UsageRow[]
+  summary: UsageSummary
+}
+
 export type Job = {
   id: string
   kind: 'transcribe' | 'youtube_download' | 'select_clips' | 'export_clip' | 'upload' | 'prescan_faces'

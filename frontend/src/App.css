@@ -804,6 +804,54 @@ input[type="number"] {
 .history-table tr.row-failed { background: rgba(248,81,73,0.05); }
 .history-table tr.row-running td:nth-child(4) { color: var(--accent); }
 .history-table .small { font-size: 12px; }
+
+/* Usage page — same table-on-dark-panel structure as History, with a
+   summary card on top showing aggregate token / cost numbers. */
+.usage-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin: 16px 0 20px;
+}
+.usage-stat {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+.usage-stat-label {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.usage-stat-value {
+  font-size: 22px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.usage-table th, .usage-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.usage-table th {
+  color: var(--muted);
+  font-weight: 500;
+  background: var(--panel);
+}
+.usage-table th.num, .usage-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.usage-table td:last-child { font-weight: 600; }
+.usage .muted.small { font-size: 12px; }
 .status-pill {
   display: inline-block;
   padding: 2px 8px;

@@ -1,4 +1,4 @@
-import type { ClipsFile, IdentitiesResponse, Job, Me, Sermon, Track, TranscriptWord } from './types'
+import type { ClipsFile, IdentitiesResponse, Job, Me, Sermon, Track, TranscriptWord, UsageResponse } from './types'
 
 async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`/api${path}`, {
@@ -30,6 +30,9 @@ export const api = {
 
   listJobs: (limit = 200) => jsonFetch<Job[]>(`/jobs?limit=${limit}`),
   getJob: (id: string) => jsonFetch<Job>(`/jobs/${id}`),
+
+  // Anthropic API usage / cost summary (admin-only).
+  getUsage: () => jsonFetch<UsageResponse>('/usage'),
 
   startTranscribe: (source: string) =>
     jsonFetch<Job>('/jobs', { method: 'POST', body: JSON.stringify({ source }) }),

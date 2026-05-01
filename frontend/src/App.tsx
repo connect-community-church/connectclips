@@ -5,6 +5,7 @@ import { SermonDetail } from './views/SermonDetail'
 import { Trim } from './views/Trim'
 import { AdminControls } from './views/AdminControls'
 import { History } from './views/History'
+import { Usage } from './views/Usage'
 import type { Clip, Me, Sermon } from './types'
 import logo from './assets/connectclips-banner.png'
 import './App.css'
@@ -14,6 +15,7 @@ type View =
   | { name: 'detail'; sermon: Sermon }
   | { name: 'trim'; sermon: Sermon; clip: Clip; clipIndex: number }
   | { name: 'history' }
+  | { name: 'usage' }
 
 // Parsed-from-URL form. Doesn't carry the full sermon/clip object — those
 // come from the API on hydration.
@@ -22,6 +24,7 @@ type Route =
   | { name: 'detail'; sermonName: string }
   | { name: 'trim'; sermonName: string; clipIndex: number }
   | { name: 'history' }
+  | { name: 'usage' }
 
 type Upload = {
   id: string  // client-side; lets the banner key by uploads even if the file
@@ -45,6 +48,7 @@ function buildPath(view: View): string {
   switch (view.name) {
     case 'list':    return '/'
     case 'history': return '/history'
+    case 'usage':   return '/usage'
     case 'detail':  return `/sermons/${encodeURIComponent(view.sermon.name)}`
     case 'trim':    return `/sermons/${encodeURIComponent(view.sermon.name)}/clip/${view.clipIndex}`
   }
@@ -53,6 +57,7 @@ function buildPath(view: View): string {
 function parsePath(pathname: string): Route {
   if (pathname === '' || pathname === '/') return { name: 'list' }
   if (pathname === '/history') return { name: 'history' }
+  if (pathname === '/usage') return { name: 'usage' }
   const trim = pathname.match(/^\/sermons\/([^/]+)\/clip\/(\d+)\/?$/)
   if (trim) {
     return { name: 'trim', sermonName: decodeURIComponent(trim[1]), clipIndex: parseInt(trim[2], 10) }
@@ -70,6 +75,7 @@ function parsePath(pathname: string): Route {
 function routeMatchesView(route: Route, view: View): boolean {
   if (route.name === 'list' && view.name === 'list') return true
   if (route.name === 'history' && view.name === 'history') return true
+  if (route.name === 'usage' && view.name === 'usage') return true
   if (route.name === 'detail' && view.name === 'detail') {
     return route.sermonName === view.sermon.name
   }
@@ -110,6 +116,7 @@ function App() {
   const hydrateRoute = useCallback(async (route: Route): Promise<View> => {
     if (route.name === 'list')    return { name: 'list' }
     if (route.name === 'history') return { name: 'history' }
+    if (route.name === 'usage')   return { name: 'usage' }
 
     const sermons = await api.listSermons()
     const sermon = sermons.find((s) => s.name === route.sermonName)
@@ -291,6 +298,12 @@ function App() {
               Activity
             </button>
           )}
+          {/* Usage: admin-only — Claude API spend per sermon + estimated cost */}
+          {me.admin && view.name !== 'usage' && (
+            <button className="secondary" onClick={() => navigate({ name: 'usage' })}>
+              Usage
+            </button>
+          )}
           {/* Admin: pre-authorized via Tailscale identity, or unlock via password */}
           <AdminControls admin={me.admin} identityAdmin={!me.anonymous && me.admin} onChange={refreshMe} />
         </div>
@@ -371,6 +384,9 @@ function App() {
             )}
             {view.name === 'history' && (
               <History onBack={() => navigate({ name: 'list' })} />
+            )}
+            {view.name === 'usage' && (
+              <Usage onBack={() => navigate({ name: 'list' })} />
             )}
           </>
         )}
