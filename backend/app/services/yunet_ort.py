@@ -1,9 +1,11 @@
-"""YuNet face detector running through ONNX Runtime, GPU-accelerated.
+"""YuNet face detector running through ONNX Runtime.
 
 Replaces ``cv2.FaceDetectorYN`` (which is CPU-only in pip's opencv-python-headless)
 without changing the model itself. Same ONNX file
-(face_detection_yunet_2023mar.onnx), same detection characteristics, runs on
-the RTX 3060 Ti via ``CUDAExecutionProvider``.
+(face_detection_yunet_2023mar.onnx), same detection characteristics. Runs on
+whichever execution provider the local ORT build offers: CUDA on NVIDIA
+Linux/Windows, CoreML on macOS, DirectML on Windows AMD/Intel, or the CPU
+fallback everywhere.
 
 The output of ``detect()`` matches ``cv2.FaceDetectorYN.detect()`` shape:
 ``(N, 15)`` per-face rows of [bbox_x, bbox_y, bbox_w, bbox_h, then 5 landmark
@@ -19,8 +21,9 @@ import cv2
 import numpy as np
 
 # Must precede onnxruntime import so cublas/cudnn/nvrtc are RTLD_GLOBAL-loaded
-# before ORT's CUDA provider tries to dlopen them.
+# before ORT's CUDA provider tries to dlopen them. (No-op on non-Linux.)
 from app import cuda_preload  # noqa: F401
+from app import platform as plat
 
 import onnxruntime as ort
 
@@ -47,8 +50,12 @@ class YuNetORT:
         nms_threshold: float = 0.3,
         providers: list[str] | None = None,
     ) -> None:
+        # Pulled from the platform helper so we use the right backend on
+        # whatever hardware we're running. Module-level dereference (not a
+        # captured-at-import-time binding) so this picks up the value
+        # populated by main.py's lifespan after platform.initialize().
         if providers is None:
-            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            providers = list(plat.ORT_PROVIDERS)
         self.sess = ort.InferenceSession(str(model_path), providers=providers)
         self.input_name = self.sess.get_inputs()[0].name
         # Output names come in a fixed order; we re-resolve by name to be safe.

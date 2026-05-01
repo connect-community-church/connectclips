@@ -50,6 +50,7 @@ class SPAStaticFiles(StaticFiles):
         return response
 
 from app import db
+from app import platform as plat
 from app.config import settings
 from app.routers import auth as auth_router
 from app.routers import jobs as jobs_router
@@ -67,6 +68,11 @@ async def lifespan(app: FastAPI):
     for d in (settings.data_sources_dir, settings.data_work_dir, settings.data_clips_dir):
         d.mkdir(parents=True, exist_ok=True)
     db.init()
+    # Run hardware detection on the main thread BEFORE any worker thread
+    # could spawn. Lazy detection from inside an export worker historically
+    # caused encode-thread hangs (CUDA context initialized in the wrong
+    # context, or ctranslate2 import racing with the ffmpeg subprocess).
+    plat.initialize()
     # Static mounts must be added before the SPA catch-all below, so they take priority
     app.mount("/files/sources", StaticFiles(directory=settings.data_sources_dir), name="sources")
     app.mount("/files/clips", StaticFiles(directory=settings.data_clips_dir), name="clips")
@@ -138,4 +144,6 @@ def health() -> dict:
         "whisper_model": settings.whisper_model,
         "claude_model": settings.claude_model,
         "spa_built": _SPA_DIST.is_dir(),
+        # What the platform helper auto-detected at startup.
+        "platform": plat.summary(),
     }

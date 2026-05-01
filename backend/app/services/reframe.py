@@ -41,6 +41,7 @@ import av
 import cv2
 import numpy as np
 
+from app import platform as plat
 from app.config import settings
 from app.services import captions
 from app.services.yunet_ort import YuNetORT
@@ -612,13 +613,13 @@ def _ffmpeg_extract(source: Path, start: float, end: float, out: Path) -> None:
     # Empirical benchmark on a 35-min-deep clip from a 60 fps source: 108 s
     # (-ss AFTER) → 7 s (-ss BEFORE), bit-exact identical output. The historical
     # warning about caption drift only applies to stream-copy (`-c copy`) mode;
-    # we re-encode to NVENC, so accurate_seek does the right thing.
+    # we re-encode here, so accurate_seek does the right thing.
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
         "-ss", f"{start}",
         "-i", str(source),
         "-t", f"{end - start}",
-        "-c:v", "h264_nvenc", "-preset", "p1", "-b:v", "8M",
+        *plat.encoder_args(plat.H264_ENCODER, fast=True, bitrate_video="8M"),
         "-c:a", "aac", "-b:a", "192k",
         "-pix_fmt", "yuv420p",
         str(out),
@@ -772,7 +773,7 @@ def _encode(
         ff_path = str(ass_path).replace("\\", "/").replace(":", "\\:")
         cmd += ["-vf", f"subtitles={ff_path}"]
     cmd += [
-        "-c:v", "h264_nvenc", "-preset", "p4", "-b:v", "6M",
+        *plat.encoder_args(plat.H264_ENCODER, fast=False, bitrate_video="6M"),
         "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "128k",
         "-shortest",

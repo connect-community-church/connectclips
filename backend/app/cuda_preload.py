@@ -32,6 +32,13 @@ def _site_packages() -> Path | None:
 
 
 def preload() -> None:
+    # Linux-only: the libs are .so files for x86_64-linux. macOS would
+    # need .dylib equivalents that CTranslate2 doesn't ship via pip
+    # anyway; Windows would need .dll handling. On those platforms skip
+    # preload entirely — faster-whisper falls back to CPU cleanly when
+    # CUDA libs aren't reachable.
+    if not sys.platform.startswith("linux"):
+        return
     sp = _site_packages()
     if sp is None:
         return
