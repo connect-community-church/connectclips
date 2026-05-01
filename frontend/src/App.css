@@ -1,5 +1,8 @@
 :root {
-  --bg: #0e1116;
+  /* Pure black so the dark banner's black edges blend seamlessly into
+     the page below — the previous #0e1116 had a faint blue tint that
+     made a visible seam at the banner / page boundary. */
+  --bg: #000000;
   --panel: #161b22;
   --panel-2: #1f262f;
   --border: #2a323d;
@@ -40,16 +43,20 @@ body, html, #root {
 .banner-bar {
   width: 100%;
   height: 280px;
-  background-color: #ffffff;
+  /* Banner artwork is on a pure-black background, so any letterboxing
+     from `cover` scaling stays invisible. Switching from the original
+     white-banner palette to black means the controls cluster also
+     needs re-coloring (see below). */
+  background-color: #000000;
   background-repeat: no-repeat;
   background-size: cover;
   background-position: center;
-  border-bottom: 1px solid var(--border);
+  /* No border — banner edges (#000) and the page bg (#000) match
+     exactly, so a divider line just adds visual noise. */
   position: relative;
   display: flex;
   /* Bottom-align so the controls cluster sits at the base of the
-     banner (near the dark page below) rather than floating in the
-     middle of the white right zone. */
+     banner near the dark page below. */
   align-items: flex-end;
   justify-content: flex-end;
   padding: 0 24px 16px;
@@ -91,22 +98,24 @@ body, html, #root {
   gap: 12px;
   font-size: 15px;
 }
+/* Controls on a black banner: white text, subtle outlined buttons that
+   match the dark theme without competing with the banner artwork. */
 .banner-bar .banner-controls .identity-badge,
 .banner-bar .banner-controls .identity-badge strong {
-  color: #1a2940;
+  color: #ffffff;
   font-size: 15px;
 }
 .banner-bar .banner-controls button,
 .banner-bar .banner-controls button.secondary {
-  background: #1a2940;
+  background: rgba(255, 255, 255, 0.08);
   color: #ffffff;
-  border: 1px solid #1a2940;
+  border: 1px solid rgba(255, 255, 255, 0.4);
   font-size: 15px;
   padding: 8px 14px;
 }
 .banner-bar .banner-controls button:hover,
 .banner-bar .banner-controls button.secondary:hover {
-  background: #2a3a55;
+  background: rgba(255, 255, 255, 0.18);
 }
 .banner-bar .banner-controls .badge.admin {
   font-size: 14px;
