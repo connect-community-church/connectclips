@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from app.config import settings
+from app.identity import get_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -22,7 +23,13 @@ class AdminEnterRequest(BaseModel):
 
 
 def is_admin(request: Request) -> bool:
-    return bool(request.session.get("admin"))
+    """True if the requester is admin via either the session cookie
+    (ADMIN_PASSWORD flow) OR Tailscale identity (ADMIN_TAILSCALE_LOGINS).
+    Mirrors the boolean exposed by /auth/me so admin-gated UI and
+    admin-gated endpoints stay consistent — without this, Tailscale
+    identity admins saw admin buttons but got 403 when they used them.
+    """
+    return get_user(request).admin
 
 
 def require_admin(request: Request) -> None:
