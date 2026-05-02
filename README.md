@@ -31,17 +31,36 @@ See [`docs/operator-manual.md`](docs/operator-manual.md) for the full volunteer 
 
 ## Hardware requirements
 
-This release targets **NVIDIA GPUs**. AMD / Intel / Apple Silicon support is on the roadmap (see [Status](#status) below); for now look for:
+Two supported deployment paths:
+
+### Linux / Windows + WSL2 with NVIDIA (production-tested)
 
 | Component | Minimum | Notes |
 |---|---|---|
 | GPU | NVIDIA, **8 GB+ VRAM** | RTX 3060 Ti tested daily; GTX 1080 / RTX 2060 family work at lower throughput |
 | CPU | Modern x86_64 | Ryzen 5 / Core i5 era or newer |
-| RAM | 16 GB | 32 GB is comfortable if you also use the box for other work |
+| RAM | 16 GB | 32 GB is comfortable |
 | Disk | 100 GB free | Sermon files are large; clips are small |
-| OS | Windows 10/11 + WSL2 (Ubuntu 24.04) | Pure Linux works the same; macOS / native Windows not yet supported |
+| OS | Windows 10/11 + WSL2 (Ubuntu 24.04) | Pure Linux works the same |
 
-Tested on a Ryzen 7 5700X + RTX 3060 Ti running WSL2 / Ubuntu 24.04.
+Uses faster-whisper (CTranslate2 + CUDA), ONNX Runtime CUDA, and NVENC.
+See [docs/DEPLOYING-wsl.md](docs/DEPLOYING-wsl.md).
+
+### macOS Apple Silicon (experimental, v0.2)
+
+| Component | Minimum | Notes |
+|---|---|---|
+| Chip | M1 or later | M3 / M4 strongly recommended for transcription speed |
+| RAM | 16 GB unified | 8 GB will swap on `large-v3`; 24 GB+ comfortable |
+| Disk | 100 GB free | Same as Linux |
+| OS | macOS 14 (Sonoma) or later | |
+
+Uses whisper.cpp + Metal for transcription, ONNX Runtime + CoreML for
+face detection, and VideoToolbox for h264 encode. Roughly 70-80% the
+throughput of the Linux/3060 Ti deployment on an M4 / 24 GB. See
+[docs/DEPLOYING-mac.md](docs/DEPLOYING-mac.md).
+
+AMD / Intel GPU paths and a fully-CPU fallback are still on the roadmap.
 
 ## Quick start
 
@@ -111,17 +130,17 @@ The pre-scan runs YuNet over the entire source once at ingest time. Trim adjustm
 
 Known limitations:
 
-- **NVIDIA GPU required** — CPU fallback is on the roadmap. Without it, transcription takes 5–10× longer.
+- **NVIDIA or Apple Silicon required** — CPU-only fallback works (slowly) on Linux but isn't tuned. Native Windows (no WSL) and AMD / Intel GPU paths are on the roadmap.
 - **Multi-speaker face picker** — fragments across ATEM full-frame ↔ PiP layout switches because the matcher doesn't use face embeddings yet. Auto-pick (highest-score live face per sample) handles single-pastor sermons correctly, which covers the common case.
-- **macOS / native-Windows deployment** — not documented yet. WSL2 is the supported path.
+- **macOS deployment is experimental** — the install path is documented and code paths exist, but the operator manual still references the Linux/WSL2 deployment for screenshots / autostart.
 
 See the [issues](../../issues) for what's actively tracked.
 
 ## Roadmap
 
-- CPU-only fallback for transcribe + face scan, so people without an NVIDIA GPU can at least try it
+- ~~Native macOS deployment (Apple Silicon: `whisper.cpp` + Metal + VideoToolbox)~~ — landed in v0.2, experimental
+- CPU-only fallback path tuned for non-GPU hardware
 - Face-embedding-based re-identification (drop-in InsightFace ONNX) so the multi-face picker works across layout shifts
-- Native macOS deployment guide (Apple Silicon: `whisper.cpp` + Metal + VideoToolbox)
 - Native Windows / AMD / Intel paths via DirectML execution provider + `h264_amf` / `h264_qsv`
 - Multiple ingest sources beyond YouTube and direct upload (Vimeo, raw stream archives, RTMP capture)
 

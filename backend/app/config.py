@@ -15,7 +15,12 @@ class Settings(BaseSettings):
 
     whisper_model: str = "large-v3"
     whisper_compute_type: str = "int8"
-    whisper_device: str = "cuda"
+    whisper_device: str = "auto"
+    # Which Whisper implementation to use:
+    #   auto           — whispercpp on macOS, ctranslate2 elsewhere
+    #   ctranslate2    — faster-whisper (CTranslate2 + CUDA on Linux)
+    #   whispercpp     — pywhispercpp (whisper.cpp + Metal on Apple Silicon)
+    whisper_backend: str = "auto"
 
     # Admin-mode password and the secret used to sign the admin session cookie.
     # If session_secret is empty, the SessionMiddleware will refuse to start —
