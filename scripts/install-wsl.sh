@@ -292,8 +292,11 @@ step_smoke_test() {
         # shellcheck disable=SC2064
         trap "kill $pid 2>/dev/null || true" RETURN
 
+        # 120 s gives smaller / cold-cache machines enough time for first-run
+        # imports of faster_whisper + onnxruntime + opencv + the CUDA libs.
+        # On a warm box this loop exits in <5 s.
         local ok=0
-        for _ in {1..30}; do
+        for _ in {1..120}; do
             if curl -fsS "http://127.0.0.1:$PORT/api/health" \
                 > /tmp/connectclips-install-health.json 2>/dev/null
             then
@@ -304,7 +307,7 @@ step_smoke_test() {
 
         if [[ $ok -eq 0 ]]; then
             cat "$logfile" >&2 || true
-            fail "Smoke test failed — uvicorn didn't respond. Log: $logfile"
+            fail "Smoke test failed after 120 s — uvicorn didn't respond. Log: $logfile"
         fi
 
         kill "$pid" 2>/dev/null || true
