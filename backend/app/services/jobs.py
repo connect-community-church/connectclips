@@ -399,11 +399,19 @@ async def _run_select_clips(
 ) -> None:
     await _start(job)
     try:
+        # No streaming progress for select_clips — it's one Anthropic call.
+        # Set a message so the UI can render something more useful than
+        # just "running" while we wait the ~30 s for Claude to respond.
+        job.progress_message = f"Calling Claude ({settings.claude_model})…"
+        _save(job)
+
         result = await asyncio.to_thread(
             clip_selection.select_clips, transcript_path, num_clips_min, num_clips_max,
         )
         out = await asyncio.to_thread(clip_selection.write_clips, result)
         job.clips_path = str(out)
+        job.progress_message = "Done"
+        job.progress_percent = 1.0
         _save(job)
         _finish(job)
     except Exception as exc:

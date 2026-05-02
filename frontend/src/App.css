@@ -1044,6 +1044,29 @@ button.small { padding: 4px 8px; font-size: 12px; }
 .status-progress progress::-webkit-progress-bar { background: var(--panel-2); border-radius: 3px; }
 .status-progress progress::-webkit-progress-value { background: var(--accent); border-radius: 3px; transition: width 200ms; }
 .status-progress progress::-moz-progress-bar { background: var(--accent); border-radius: 3px; }
+
+/* Indeterminate state — used for jobs without a meaningful percentage
+   (e.g. select_clips, which is a single Claude API call). The default
+   browser animation is suppressed by `appearance: none` above, so we
+   draw our own moving gradient stripe. */
+.status-progress progress:not([value]) {
+  background: linear-gradient(
+    90deg,
+    var(--panel-2) 0%,
+    var(--accent) 40%,
+    var(--accent) 60%,
+    var(--panel-2) 100%
+  );
+  background-size: 60% 100%;
+  background-repeat: no-repeat;
+  animation: status-progress-indeterminate 1.2s ease-in-out infinite;
+}
+.status-progress progress:not([value])::-webkit-progress-bar { background: transparent; }
+.status-progress progress:not([value])::-moz-progress-bar { background: transparent; }
+@keyframes status-progress-indeterminate {
+  0%   { background-position: -60% 0; }
+  100% { background-position: 160% 0; }
+}
 .status-progress-pct {
   font-size: 11px;
   color: var(--accent);

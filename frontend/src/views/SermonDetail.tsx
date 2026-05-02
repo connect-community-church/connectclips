@@ -34,6 +34,32 @@ function jobLabel(j: Job): string {
   return `${kind} done`
 }
 
+function JobProgress({ job }: { job: Job | undefined }) {
+  if (!job) return null
+  if (job.status !== 'running' && job.status !== 'queued') return null
+  const hasPercent = typeof job.progress_percent === 'number'
+  return (
+    <div className="status-progress">
+      {/* HTML5 `<progress>` renders an animated indeterminate bar when no
+          value attribute is set — used here for jobs (like select_clips)
+          that don't expose a percentage during their single API call. */}
+      {hasPercent ? (
+        <progress value={job.progress_percent ?? 0} max={1} />
+      ) : (
+        <progress />
+      )}
+      {hasPercent && (
+        <span className="status-progress-pct">
+          {Math.round((job.progress_percent ?? 0) * 100)}%
+        </span>
+      )}
+      {job.progress_message && (
+        <div className="status-progress-msg muted small">{job.progress_message}</div>
+      )}
+    </div>
+  )
+}
+
 function hookScoreClass(score: number): string {
   if (score >= 85) return 'high'
   if (score >= 70) return 'good'
@@ -92,6 +118,7 @@ export function SermonDetail({ sermon, admin, onBack, onTrim, onDeleted }: Props
 
   const transcribeJob = recentJobsFor('transcribe')
   const selectJob = recentJobsFor('select_clips')
+  const prescanJob = recentJobsFor('prescan_faces')
 
   const onTranscribe = () => api.startTranscribe(sermon.name).catch((e) => setError(String(e)))
   const onSelectClips = () =>
@@ -133,6 +160,7 @@ export function SermonDetail({ sermon, admin, onBack, onTrim, onDeleted }: Props
               <button onClick={onTranscribe} disabled={runningKinds.has('transcribe')}>
                 {runningKinds.has('transcribe') ? 'Running…' : 'Run transcribe'}
               </button>
+              <JobProgress job={transcribeJob} />
               {transcribeJob && transcribeJob.status === 'failed' && (
                 <span className="error-inline">{jobLabel(transcribeJob)}</span>
               )}
@@ -172,6 +200,7 @@ export function SermonDetail({ sermon, admin, onBack, onTrim, onDeleted }: Props
               >
                 {runningKinds.has('select_clips') ? 'Re-running…' : 'Re-run'}
               </button>
+              <JobProgress job={selectJob} />
             </>
           ) : (
             <>
@@ -182,12 +211,19 @@ export function SermonDetail({ sermon, admin, onBack, onTrim, onDeleted }: Props
                 {runningKinds.has('select_clips') ? 'Running…' : 'Run clip selection'}
               </button>
               {!sermon.transcribed && <span className="muted">(transcribe first)</span>}
+              <JobProgress job={selectJob} />
               {selectJob && selectJob.status === 'failed' && (
                 <span className="error-inline">{jobLabel(selectJob)}</span>
               )}
             </>
           )}
         </div>
+        {prescanJob && (prescanJob.status === 'queued' || prescanJob.status === 'running') && (
+          <div className="step">
+            <div className="step-title muted">Background: face prescan</div>
+            <JobProgress job={prescanJob} />
+          </div>
+        )}
       </section>
 
       {clips && (
@@ -231,6 +267,7 @@ export function SermonDetail({ sermon, admin, onBack, onTrim, onDeleted }: Props
                       </span>
                     )}
                   </div>
+                  {exporting && <JobProgress job={latest} />}
                   <div className="clip-rationale">{clip.rationale}</div>
                   {clip.hook_rationale && (
                     <div className="clip-hook-rationale">
