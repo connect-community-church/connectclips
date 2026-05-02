@@ -42,6 +42,35 @@ Plan on **30-60 minutes** end-to-end.
 
 ---
 
+## Quick install (recommended)
+
+If you're standing up a new Mac and just want this working, the
+sequence below — sections 1 through 11 — is automated by
+`scripts/install-mac.sh`. After cloning the repo:
+
+```bash
+cd ~/ConnectClips
+./scripts/install-mac.sh
+```
+
+The script is idempotent (re-runnable if a step fails), prompts once
+for your Anthropic API key and an admin password, and finishes by
+loading the launchd autostart agent. Plan on **20–40 minutes**, mostly
+waiting on `pip install` to compile `pywhispercpp`. If you want to
+understand each step, or you're debugging a failure, the manual
+walkthrough below covers exactly what the script does.
+
+To run the script non-interactively (e.g. in CI or remote
+provisioning), set the secrets in the environment first:
+
+```bash
+export CONNECTCLIPS_API_KEY=sk-ant-...
+export CONNECTCLIPS_ADMIN_PASSWORD='your-admin-password'
+./scripts/install-mac.sh
+```
+
+---
+
 ## 1. Xcode Command Line Tools
 
 `pywhispercpp` and a few other packages compile from source. They need
@@ -113,19 +142,29 @@ cd ConnectClips
 
 ## 5. Backend setup
 
-### 5a. Patch brew's `python@3.12` for Tahoe's libexpat ABI
+### 5a. Patch brew's `python@3.12` for Tahoe's libexpat ABI (only if needed)
 
-Skip this if `python3.12 -m ensurepip --version` runs cleanly. On
-Tahoe 26.x with brew bottle `python@3.12 3.12.13_2`, it errors with
+Run this check first:
+
+```bash
+python3.12 -m ensurepip --version
+```
+
+If it prints `pip 2X.Y` cleanly, **skip this whole section** — the brew
+bottle is healthy on your machine and no patch is needed. (As of mid-2026
+brew has shipped fixed bottles for most Tahoe versions; this workaround
+mainly applied to a window in early 2026.)
+
+If instead you see:
 
 ```
 ImportError: dlopen(.../pyexpat.cpython-312-darwin.so):
 Symbol not found: _XML_SetAllocTrackerActivationThreshold
 ```
 
-The brew bottle was built against expat 2.7+, but the libexpat that
-ships in Tahoe's dyld shared cache is older. Repoint pyexpat at brew's
-expat (which we installed in step 3):
+…then the brew bottle was built against expat 2.7+ but the libexpat
+that ships in your version of Tahoe's dyld shared cache is older.
+Repoint pyexpat at brew's expat (which we installed in step 3):
 
 ```bash
 PYEXPAT="$(brew --prefix python@3.12)/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/pyexpat.cpython-312-darwin.so"
@@ -135,7 +174,9 @@ codesign --force --sign - "$PYEXPAT"
 
 Verify: `python3.12 -c 'from pyexpat import *; print("ok")'` should
 print `ok`. **This patch is reverted by `brew upgrade python@3.12`** —
-re-run it after any python upgrade until brew ships a fixed bottle.
+re-run it after any python upgrade if the symbol error returns.
+`scripts/install-mac.sh` does this detection + patch automatically, so
+if you used the script you don't need to do this manually.
 
 ### 5b. Create the venv and install Python dependencies
 
@@ -234,7 +275,13 @@ source .venv/bin/activate
 uvicorn app.main:app --host 0.0.0.0 --port 8765
 ```
 
-You should see `Application startup complete`. From a second terminal:
+Wait for `Application startup complete`. **First-time cold start can
+take 30–90 seconds** on smaller-RAM Macs (M1/M2 8–16 GB) because the
+import chain — `faster_whisper` + `pywhispercpp` + `onnxruntime` +
+`opencv` — has to populate the filesystem cache. Subsequent starts are
+under 5 seconds. Don't kill the process during the cold start.
+
+From a second terminal:
 
 ```bash
 curl http://localhost:8765/api/health
@@ -478,6 +525,18 @@ your machine is swapping. 8 GB Macs feel this with `large-v3`; the
 fix is either upgrade to a 16 GB+ machine or set
 `WHISPER_MODEL=medium` in `.env` (smaller / faster / slightly less
 accurate).
+
+**`select_clips` fails with `401 invalid x-api-key` even though the
+key works elsewhere** — Anthropic's abuse heuristics flag requests
+from datacenter / cloud / VPN IP ranges that don't look like normal
+end-user traffic. Affects rented cloud Macs (rentamac.io, MacStadium,
+AWS EC2 mac instances, etc.) but not Macs on residential / business
+ISPs. Confirm by running the same key through `curl` from your home
+network — if that returns `HTTP 200`, your key is fine and the issue
+is per-IP. Workaround: email `support@anthropic.com` and ask them to
+whitelist the affected IP for your workspace, or run the install on
+an on-premises Mac instead. ConnectClips is designed to live on a
+church-owned Mac, so this almost never bites real deployments.
 
 ---
 
