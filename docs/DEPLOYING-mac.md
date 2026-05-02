@@ -35,8 +35,10 @@ Plan on **30-60 minutes** end-to-end.
   transcription thrashes; 24 GB+ is comfortable)
 - ~30 GB free for venv + node_modules + Whisper model cache
 - ~100 GB free wherever you'll keep sermon files
-- An [Anthropic API key](https://console.anthropic.com/) with a small
-  billing credit (a few dollars goes a long way)
+- An [Anthropic API key](anthropic-api-key.md) with a small
+  billing credit (a few dollars goes a long way) — see the
+  [step-by-step walkthrough](anthropic-api-key.md) if it's your first
+  time setting one up.
 - (Optional but recommended) a [Tailscale](https://tailscale.com/)
   tailnet for remote access
 

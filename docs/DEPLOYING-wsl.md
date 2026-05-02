@@ -23,7 +23,7 @@ Plan on **45–90 minutes** end-to-end, mostly waiting for `pip install` to comp
 - Latest [NVIDIA Game Ready / Studio driver](https://www.nvidia.com/Download/index.aspx) installed on the **Windows side** — CUDA passes through to WSL via the Windows driver, you do not install a separate CUDA toolkit
 - ~30 GB free on whichever drive you put the venv + node_modules + model cache on (we recommend the WSL ext4 filesystem, not `/mnt/c/`)
 - ~100 GB free on the drive you'll store sermon files on (`/mnt/c/` is fine for v1)
-- An [Anthropic API key](https://console.anthropic.com/) — billing account with a small credit (a few dollars goes a long way)
+- An [Anthropic API key](anthropic-api-key.md) — billing account with a small credit (a few dollars goes a long way). If it's your first time, the [step-by-step walkthrough](anthropic-api-key.md) covers account setup → billing → key generation → pasting into ConnectClips.
 - (Optional but recommended) a [Tailscale](https://tailscale.com/) tailnet for remote access
 
 ---
