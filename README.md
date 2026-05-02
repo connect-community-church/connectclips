@@ -46,7 +46,7 @@ Two supported deployment paths:
 Uses faster-whisper (CTranslate2 + CUDA), ONNX Runtime CUDA, and NVENC.
 See [docs/DEPLOYING-wsl.md](docs/DEPLOYING-wsl.md).
 
-### macOS Apple Silicon (experimental, v0.2)
+### macOS Apple Silicon (experimental)
 
 | Component | Minimum | Notes |
 |---|---|---|
@@ -126,7 +126,7 @@ The pre-scan runs YuNet over the entire source once at ingest time. Trim adjustm
 
 ## Status
 
-**v0.1 — pre-release.** Working end-to-end and in real use at one church. Two sermons fully through the pipeline.
+**Pre-1.0.** Working end-to-end and in real use at one church. The Linux/NVIDIA path is production-tested; the macOS path is experimental but validated end-to-end on M-series hardware. See the [GitHub releases page](../../releases) for the latest tag.
 
 Known limitations:
 
