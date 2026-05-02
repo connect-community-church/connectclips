@@ -58,12 +58,31 @@ step_xcode_clt() {
     fail "Click through the CLT installer dialog, wait for it to finish, then re-run this script."
 }
 
+prime_sudo() {
+    # The Homebrew installer needs sudo to chown /opt/homebrew. With
+    # NONINTERACTIVE=1 it can't prompt for a password — it just bails with
+    # the misleading "Need sudo access on macOS" error if there's no cached
+    # credential. So we prime the cache here, prompting once if needed.
+    if sudo -n true 2>/dev/null; then
+        return
+    fi
+    log "Sudo needed for Homebrew install. You'll be prompted once."
+    sudo -v
+    # Keep the cache warm in the background so a slow brew install doesn't
+    # let the credential expire mid-install.
+    ( while true; do sudo -n true 2>/dev/null || exit; sleep 60; done ) &
+    SUDO_REFRESH_PID=$!
+    # shellcheck disable=SC2064
+    trap "kill $SUDO_REFRESH_PID 2>/dev/null || true" EXIT
+}
+
 step_homebrew() {
     log "[2/11] arm64 Homebrew"
     if [[ -x "$BREW" ]]; then
         log "  $BREW already installed"
     else
-        warn "  installing Homebrew (will prompt for sudo password)"
+        prime_sudo
+        warn "  installing Homebrew"
         NONINTERACTIVE=1 /bin/bash -c \
             "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     fi
