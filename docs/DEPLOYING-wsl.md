@@ -102,6 +102,41 @@ Reopen Ubuntu.
 
 ---
 
+## Quick install (recommended)
+
+Once Step 1 is done — WSL2 + systemd up, `vmIdleTimeout=-1` set, NVIDIA
+driver current on the Windows side — sections 2 through 9 are automated
+by `scripts/install-wsl.sh`. Inside the Ubuntu shell:
+
+```bash
+cd ~
+git clone https://github.com/connect-community-church/connectclips.git ConnectClips
+cd ConnectClips
+./scripts/install-wsl.sh
+```
+
+The script is idempotent (re-runnable if a step fails), prompts once for
+your Anthropic API key and an admin password, and finishes by enabling
+the `connectclips.service` systemd unit. Plan on **45–90 minutes**, mostly
+waiting on `pip install` to compile a few hundred MB of CUDA wheels.
+
+It does **not** touch the Windows side — Step 9d (Task Scheduler boot
+trigger), Step 9f (firewall rule), and Step 10 (Tailscale) still need to
+be done manually after the script finishes.
+
+To run the script non-interactively (e.g. in CI or scripted provisioning):
+
+```bash
+export CONNECTCLIPS_API_KEY=sk-ant-...
+export CONNECTCLIPS_ADMIN_PASSWORD='your-admin-password'
+./scripts/install-wsl.sh
+```
+
+If you want to understand each step, or you're debugging a failure, the
+manual walkthrough below is exactly what the script does.
+
+---
+
 ## 2. System packages
 
 ```bash
