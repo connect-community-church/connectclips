@@ -1,0 +1,186 @@
+name: Build whisper-cli (Vulkan)
+
+# Builds a Vulkan-enabled whisper-cli for Windows x64 + Linux x64 from a
+# pinned whisper.cpp ref, and uploads the binaries as ConnectClips release
+# assets so install-windows.ps1 + install-wsl.sh can `Invoke-WebRequest` /
+# `curl` them at deploy time.
+#
+# Triggered manually -- there's no value in auto-rebuilding on every
+# upstream commit. When you want to bump whisper.cpp, run this workflow
+# from the Actions tab with the new tag.
+#
+# Pre-req before running:
+#   1. Create a ConnectClips release (draft is fine) whose tag matches
+#      `release_tag` below. The workflow will attach assets to it.
+#      For ad-hoc test builds, leave `release_tag` empty -- the binaries
+#      will only be uploaded as workflow artifacts (90-day retention).
+
+on:
+  workflow_dispatch:
+    inputs:
+      whisper_cpp_ref:
+        description: 'whisper.cpp git ref (tag / branch / SHA)'
+        default: 'v1.8.4'
+        required: true
+      release_tag:
+        description: 'ConnectClips release tag to attach assets to (leave empty to skip release upload)'
+        default: ''
+        required: false
+      vulkan_sdk_version:
+        description: 'Vulkan SDK version (Windows -- LunarG installer)'
+        default: '1.4.341.1'
+        required: false
+
+permissions:
+  contents: write   # needed by softprops/action-gh-release to upload assets
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset_suffix: windows-x64-vulkan
+            archive: zip
+          - os: ubuntu-latest
+            asset_suffix: linux-x64-vulkan
+            archive: tar.gz
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout whisper.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: ${{ inputs.whisper_cpp_ref }}
+          path: whisper.cpp
+
+      # Windows: LunarG installer is the canonical Vulkan SDK source. ~1 GB
+      # download but cached by the runner image's storage between steps.
+      - name: Install Vulkan SDK (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ver = '${{ inputs.vulkan_sdk_version }}'
+          $url = "https://sdk.lunarg.com/sdk/download/$ver/windows/vulkansdk-windows-X64-$ver.exe"
+          Write-Host "Downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile vulkansdk.exe -UseBasicParsing
+          Start-Process .\vulkansdk.exe `
+            -ArgumentList @('--accept-licenses','--default-answer','--confirm-command','install') `
+            -Wait
+          $sdk = "C:\VulkanSDK\$ver"
+          if (-not (Test-Path "$sdk\Lib\vulkan-1.lib")) { throw "Vulkan SDK install failed at $sdk" }
+          "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Add-Content -Path $env:GITHUB_PATH -Value "$sdk\Bin"
+
+      # Linux: apt has everything we need. shaderc-tools provides glslc.
+      - name: Install Vulkan + build deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libvulkan-dev vulkan-headers vulkan-tools \
+            glslang-tools glslc \
+            cmake ninja-build build-essential
+
+      - name: Set up MSVC env (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure
+        working-directory: whisper.cpp
+        shell: bash
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_VULKAN=ON \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DWHISPER_BUILD_EXAMPLES=ON \
+            -DWHISPER_BUILD_TESTS=OFF \
+            -DWHISPER_BUILD_SERVER=OFF
+
+      - name: Build
+        working-directory: whisper.cpp
+        run: cmake --build build --config Release -j
+
+      - name: Smoke-launch the binary (no transcribe -- runners have no GPU)
+        working-directory: whisper.cpp
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            BIN=build/bin/whisper-cli.exe
+          else
+            BIN=build/bin/whisper-cli
+          fi
+          if [[ ! -x "$BIN" && ! -f "$BIN" ]]; then
+            echo "binary missing: $BIN" >&2
+            exit 1
+          fi
+          # whisper-cli prints usage to stderr and exits 1 with no args; that
+          # exercises link + Vulkan symbol resolution without needing a GPU.
+          "$BIN" --help 2>&1 | head -5 || true
+          ls -la "$BIN"
+
+      - name: Package
+        id: package
+        shell: bash
+        run: |
+          ref='${{ inputs.whisper_cpp_ref }}'
+          name="whispercli-${{ matrix.asset_suffix }}-${ref}"
+          mkdir -p package
+
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp whisper.cpp/build/bin/whisper-cli.exe package/
+          else
+            cp whisper.cpp/build/bin/whisper-cli package/
+          fi
+
+          cp whisper.cpp/LICENSE package/LICENSE.whisper-cpp.txt
+          commit=$(cd whisper.cpp && git rev-parse HEAD)
+          built_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          cat > package/README.md <<EOF
+          # whisper-cli (Vulkan-enabled) -- ConnectClips redistribution
+
+          - whisper.cpp ref: ${ref}
+          - whisper.cpp commit: ${commit}
+          - Built: ${built_at}
+          - Built by: ConnectClips GitHub Actions on ${{ runner.os }}
+          - Build options: -DGGML_VULKAN=ON -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=ON
+          - whisper.cpp license: MIT (see LICENSE.whisper-cpp.txt)
+
+          ## Usage
+
+          ConnectClips invokes this binary from
+          backend/app/services/transcribe.py via WHISPER_CLI_PATH.
+          See docs/DEPLOYING-windows.md for the install script that
+          downloads + wires this in automatically.
+          EOF
+
+          if [[ "${{ matrix.archive }}" == "zip" ]]; then
+            asset="$name.zip"
+            (cd package && 7z a -tzip "../$asset" *)
+          else
+            asset="$name.tar.gz"
+            tar -czf "$asset" -C package .
+          fi
+
+          echo "asset_name=$asset" >> "$GITHUB_OUTPUT"
+          ls -la "$asset"
+
+      - name: Upload as workflow artifact (always)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_suffix }}-${{ inputs.whisper_cpp_ref }}
+          path: ${{ steps.package.outputs.asset_name }}
+          retention-days: 90
+
+      - name: Attach to ConnectClips release (if release_tag provided)
+        if: inputs.release_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          files: ${{ steps.package.outputs.asset_name }}
+          fail_on_unmatched_files: true
