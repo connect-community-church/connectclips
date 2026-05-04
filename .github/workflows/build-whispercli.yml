@@ -74,13 +74,13 @@ jobs:
           "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Add-Content -Path $env:GITHUB_PATH -Value "$sdk\Bin"
 
-      # Linux: apt has everything we need. shaderc-tools provides glslc.
+      # Linux: apt has everything we need. libvulkan-dev pulls vulkan headers.
       - name: Install Vulkan + build deps (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
-            libvulkan-dev vulkan-headers vulkan-tools \
+            libvulkan-dev vulkan-tools \
             glslang-tools glslc \
             cmake ninja-build build-essential
 
