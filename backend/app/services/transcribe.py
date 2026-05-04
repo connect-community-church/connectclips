@@ -1,18 +1,24 @@
 """Whisper transcription service with pluggable backends.
 
-Two backends are supported behind a single ``transcribe_file`` entry point:
+Three backends are supported behind a single ``transcribe_file`` entry point:
 
-  - ``ctranslate2`` — faster-whisper (CTranslate2 + CUDA on Linux+NVIDIA,
-    falls back to CPU elsewhere). Mature, fast, well-tested. Default on
-    Linux and Windows.
-  - ``whispercpp`` — pywhispercpp (whisper.cpp + Metal on Apple Silicon).
-    Default on macOS where Metal acceleration closes most of the gap with
+  - ``ctranslate2`` -- faster-whisper (CTranslate2 + CUDA on Linux+NVIDIA,
+    falls back to CPU elsewhere). Mature, well-tested. Used on
+    Linux+NVIDIA and as a CPU fallback when no other backend is available.
+  - ``whispercpp`` -- pywhispercpp (whisper.cpp + Metal on Apple Silicon).
+    Used on macOS where Metal acceleration closes most of the gap with
     faster-whisper + CUDA.
+  - ``whispercli`` -- a pre-built whisper.cpp binary subprocessed from
+    Python. The binary is built with Vulkan support so it lights up AMD
+    iGPUs / dGPUs (Radeon 680M, RX cards, etc.). Used on Windows-native
+    AMD boxes and on Linux+AMD boxes once we ship the binaries via
+    GitHub Releases. The subprocess overhead is negligible (transcribes
+    take minutes, fork is microseconds).
 
 Choice is made at startup from the ``WHISPER_BACKEND`` env var; ``auto``
-picks ``whispercpp`` on Darwin and ``ctranslate2`` everywhere else. Both
-backends produce the same transcript JSON shape, so callers don't care
-which one ran.
+picks ``whispercpp`` on Darwin, ``whispercli`` whenever the binary is
+discoverable, and ``ctranslate2`` everywhere else. All three backends
+produce the same transcript JSON shape so callers don't care which one ran.
 """
 
 from __future__ import annotations
@@ -20,6 +26,10 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import os
+import re
+import shutil
+import subprocess
 from pathlib import Path
 from threading import Lock
 from typing import Any, Callable
@@ -44,17 +54,38 @@ _model_lock = Lock()
 
 # ---------- Backend selection ---------------------------------------------
 
+_VALID_BACKENDS = ("ctranslate2", "whispercpp", "whispercli")
+
+
+def _resolve_whispercli_binary() -> Path | None:
+    """Find the whisper-cli executable, or None if not discoverable."""
+    if settings.whisper_cli_path:
+        p = Path(settings.whisper_cli_path)
+        if p.is_file():
+            return p
+        logger.warning("WHISPER_CLI_PATH=%s does not exist", settings.whisper_cli_path)
+    found = shutil.which("whisper-cli") or shutil.which("whisper-cli.exe")
+    return Path(found) if found else None
+
+
 def _resolve_backend() -> str:
     """Pick which Whisper implementation to use.
 
-    Reads WHISPER_BACKEND from .env. ``auto`` picks ``whispercpp`` on
-    macOS (Metal accelerates Whisper there) and ``ctranslate2``
-    elsewhere (faster-whisper is the most mature path on Linux/Windows).
+    Reads WHISPER_BACKEND from .env. ``auto`` prefers, in order:
+    macOS -> ``whispercpp`` (Metal); ``whispercli`` when the binary is
+    discoverable on PATH or via WHISPER_CLI_PATH (Vulkan on AMD/Intel
+    GPUs); ``ctranslate2`` everywhere else (faster-whisper, CPU fallback
+    or CUDA on Linux+NVIDIA).
     """
     backend = (settings.whisper_backend or "auto").lower()
     if backend in ("auto", ""):
-        backend = "whispercpp" if plat.PLATFORM == "Darwin" else "ctranslate2"
-    if backend not in ("ctranslate2", "whispercpp"):
+        if plat.PLATFORM == "Darwin":
+            backend = "whispercpp"
+        elif _resolve_whispercli_binary() is not None:
+            backend = "whispercli"
+        else:
+            backend = "ctranslate2"
+    if backend not in _VALID_BACKENDS:
         logger.warning("Unknown WHISPER_BACKEND=%r; falling back to ctranslate2", backend)
         backend = "ctranslate2"
     return backend
@@ -276,18 +307,207 @@ def _transcribe_whispercpp(source: Path, progress_cb: ProgressCB | None) -> dict
     }
 
 
+# ---------- Backend: whisper-cli subprocess (Vulkan whisper.cpp) -----------
+
+def _resolve_ggml_model_path(model_name: str) -> Path:
+    """Resolve ``small`` / ``medium.en`` / ``large-v3`` etc. to a ggml-*.bin path.
+
+    Search order:
+      1. ``$WHISPER_MODEL_DIR/ggml-<name>.bin`` (explicit override)
+      2. ``~/.cache/whisper.cpp/ggml-<name>.bin`` (whisper.cpp convention)
+
+    Raises FileNotFoundError listing both paths if nothing matched, so the
+    error message tells the operator exactly where to drop the file.
+    """
+    candidates: list[Path] = []
+    if settings.whisper_model_dir:
+        candidates.append(Path(settings.whisper_model_dir) / f"ggml-{model_name}.bin")
+    candidates.append(Path.home() / ".cache" / "whisper.cpp" / f"ggml-{model_name}.bin")
+    for p in candidates:
+        if p.is_file():
+            return p
+    raise FileNotFoundError(
+        "GGML model not found for whispercli backend. Looked at:\n  "
+        + "\n  ".join(str(p) for p in candidates)
+        + f"\nDownload ggml-{model_name}.bin from "
+        f"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{model_name}.bin "
+        "or set WHISPER_MODEL_DIR to a directory that contains it."
+    )
+
+
+# whisper-cli's --print-progress emits lines like "whisper_print_progress: progress = 12%".
+_PROGRESS_RE = re.compile(r"progress\s*=\s*(\d+)\s*%")
+
+
+def _whispercli_words_from_json(json_path: Path) -> tuple[list[dict], str | None]:
+    """Parse whisper-cli's --output-json-full into (word_entries, language).
+
+    Each entry produced with --max-len 1 + --split-on-word is one word
+    (sometimes a punctuation token, sometimes a whisper marker like
+    [_BEG_] which we filter). offsets are in milliseconds.
+    """
+    raw = json.loads(json_path.read_text(encoding="utf-8"))
+    language = (raw.get("result") or {}).get("language")
+    words: list[dict] = []
+    for entry in raw.get("transcription", []):
+        text = (entry.get("text") or "").strip()
+        if not text:
+            continue
+        if text.startswith("[") and text.endswith("]"):
+            continue  # skip whisper begin/end markers
+        offsets = entry.get("offsets") or {}
+        words.append({
+            "word": text,
+            "start": float(offsets.get("from", 0)) / 1000.0,
+            "end": float(offsets.get("to", 0)) / 1000.0,
+        })
+    return words, language
+
+
+def _group_words_into_segments(word_entries: list[dict]) -> list[dict]:
+    """Re-assemble per-word entries into sentence-like segments.
+
+    The grouping rule mirrors _transcribe_whispercpp so transcripts produced
+    by either backend look the same to the rest of the pipeline (caption
+    rendering, clip-selection prompts, etc.).
+    """
+    out: list[dict] = []
+    cur_words: list[dict] = []
+    cur_start: float | None = None
+
+    def flush() -> None:
+        if not cur_words:
+            return
+        out.append({
+            "id": len(out),
+            "start": cur_start,
+            "end": cur_words[-1]["end"],
+            "text": " ".join(w["word"] for w in cur_words),
+            "words": list(cur_words),
+        })
+
+    for w in word_entries:
+        if cur_start is None:
+            cur_start = w["start"]
+        cur_words.append(w)
+        if w["word"].endswith((".", "?", "!")) or len(cur_words) >= 30:
+            flush()
+            cur_words = []
+            cur_start = None
+    flush()
+    return out
+
+
+def _transcribe_whispercli(source: Path, progress_cb: ProgressCB | None) -> dict:
+    """Run the pre-built whisper.cpp binary as a subprocess and parse its JSON.
+
+    The binary handles Vulkan device init internally. We just need to:
+      - point it at the right model file
+      - tell it to emit per-word JSON (--output-json-full + --max-len 1 +
+        --split-on-word)
+      - parse stderr for progress percentages and pump them through
+        progress_cb at ~5% increments
+    """
+    cli = _resolve_whispercli_binary()
+    if cli is None:
+        raise RuntimeError(
+            "whispercli backend selected but whisper-cli not found. "
+            "Set WHISPER_CLI_PATH in .env or put whisper-cli on PATH."
+        )
+    model_path = _resolve_ggml_model_path(settings.whisper_model)
+
+    duration = _probe_duration(source)
+    threads = max(1, os.cpu_count() or 4)
+
+    # whisper-cli writes <input>.json next to the input file when
+    # --output-json-full is set. Use a sibling path under the work dir
+    # to avoid touching the source dir.
+    json_out = source.with_suffix(source.suffix + ".whispercli.json")
+    # whisper-cli's --output-file flag controls the prefix (it appends .json itself).
+    out_prefix = str(json_out)[: -len(".json")]
+
+    cmd = [
+        str(cli),
+        "-m", str(model_path),
+        "-f", str(source),
+        "-t", str(threads),
+        "--output-json-full",
+        "--output-file", out_prefix,
+        "--max-len", "1",
+        "--split-on-word",
+        "--print-progress",
+    ]
+    logger.info("whispercli: %s", " ".join(cmd))
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,           # line-buffered
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    last_pct_emit = -1.0
+    assert proc.stdout is not None  # subprocess.PIPE guarantees this
+    for line in proc.stdout:
+        m = _PROGRESS_RE.search(line)
+        if not m or progress_cb is None or duration <= 0:
+            continue
+        pct = min(1.0, int(m.group(1)) / 100.0)
+        if pct >= last_pct_emit + 0.05:
+            seg_end_s = pct * duration
+            progress_cb(f"Transcribing audio ({int(seg_end_s)}/{int(duration)}s)", pct)
+            last_pct_emit = pct
+
+    rc = proc.wait()
+    if rc != 0:
+        raise RuntimeError(f"whisper-cli exited with code {rc}")
+
+    if not json_out.exists():
+        raise RuntimeError(f"whisper-cli did not produce {json_out}")
+
+    word_entries, language = _whispercli_words_from_json(json_out)
+    segments = _group_words_into_segments(word_entries)
+
+    # Final progress nudge in case the throttled callback didn't reach 1.0.
+    if progress_cb is not None and duration > 0 and last_pct_emit < 1.0:
+        progress_cb(f"Transcribing audio ({int(duration)}/{int(duration)}s)", 1.0)
+
+    # Clean up the JSON sidecar -- the parsed transcript is what we keep.
+    try:
+        json_out.unlink()
+    except OSError:
+        pass
+
+    return {
+        "source": source.name,
+        "duration": duration,
+        "language": language,
+        "language_probability": None,
+        "model": settings.whisper_model,
+        "backend": "whispercli",
+        "compute_type": "vulkan",  # whisper-cli auto-picks Vulkan when built with it
+        "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "segments": segments,
+    }
+
+
 # ---------- Public entry point --------------------------------------------
 
 def transcribe_file(source: Path, progress_cb: ProgressCB | None = None) -> dict:
     """Transcribe an audio/video file and return a JSON-serializable transcript.
 
     Blocking. Call from a thread (asyncio.to_thread) when invoked from async code.
-    Backend chosen by WHISPER_BACKEND env var; both backends produce the
+    Backend chosen by WHISPER_BACKEND env var; all three backends produce the
     same output shape.
     """
     backend = _resolve_backend()
     if backend == "whispercpp":
         return _transcribe_whispercpp(source, progress_cb)
+    if backend == "whispercli":
+        return _transcribe_whispercli(source, progress_cb)
     return _transcribe_ctranslate2(source, progress_cb)
 
 

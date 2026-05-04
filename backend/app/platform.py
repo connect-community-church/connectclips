@@ -6,9 +6,12 @@ hardware-agnostic. Three things to detect:
   1. Which h264 encoder is available in the local ffmpeg build (NVENC on
      NVIDIA Linux/Windows, AMF on AMD Windows, QSV on Intel Windows,
      VideoToolbox on macOS, libx264 software fallback everywhere).
-  2. Which ONNX Runtime execution providers are installed (CUDA on Linux
-     with onnxruntime-gpu, CoreML on macOS, DirectML on Windows, CPU
-     everywhere).
+  2. Which ONNX Runtime execution providers are installed. The base
+     `onnxruntime` wheel that ships in requirements.txt only carries the
+     CPU provider (plus CoreML on macOS); the install scripts swap it
+     for `onnxruntime-gpu` on Linux+NVIDIA boxes, which adds CUDA. Other
+     providers (DirectML on Windows, ROCm on Linux+AMD) require swapping
+     to a different ORT wheel — not done by default.
   3. Whether the NVIDIA driver is actually loaded — onnxruntime-gpu lists
      CUDAExecutionProvider as available even on a box with no driver.
 

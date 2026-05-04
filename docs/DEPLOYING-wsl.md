@@ -205,9 +205,15 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip wheel
 pip install -r requirements.txt
+
+# CUDA extras only on NVIDIA boxes (skip on AMD / CPU-only).
+if nvidia-smi -L | grep -q '^GPU'; then
+  pip uninstall -y onnxruntime onnxruntime-gpu  # avoid file-clobber between the two
+  pip install -r requirements-cuda.txt
+fi
 ```
 
-This pulls a few hundred MB of CUDA libraries (`nvidia-cudnn-cu12`, `nvidia-cublas-cu12`, etc.) for `faster-whisper` and `onnxruntime-gpu`. Expect 5–15 minutes.
+`requirements.txt` is the cross-platform CPU base — Whisper runs CPU-only here. The conditional `requirements-cuda.txt` block adds ~2 GB of CUDA libraries (`nvidia-cudnn-cu12`, `nvidia-cublas-cu12`, etc.) and `onnxruntime-gpu`, lighting up the GPU path for `faster-whisper` and YuNet. Expect 5–15 minutes for that block. `scripts/install-wsl.sh` does both steps for you and only runs the CUDA block when `nvidia-smi` reports a GPU.
 
 ### 5a. Pre-fetch the YuNet face-detection model
 

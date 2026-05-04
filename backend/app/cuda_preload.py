@@ -1,10 +1,17 @@
 """Preload the nvidia cuBLAS / cuDNN / NVRTC shared libraries.
 
 ctranslate2 (used by faster-whisper) does not bundle CUDA runtime libs and
-expects them on the dynamic linker's path. We get them via the
-nvidia-cublas-cu12 / nvidia-cudnn-cu12 / nvidia-cuda-nvrtc-cu12 pip packages,
-and load them with ctypes RTLD_GLOBAL so ctranslate2's later dlopen calls
-resolve. This avoids needing LD_LIBRARY_PATH in the shell.
+expects them on the dynamic linker's path. On Linux+NVIDIA boxes we get
+them via the nvidia-cublas-cu12 / nvidia-cudnn-cu12 / nvidia-cuda-nvrtc-cu12
+pip packages installed from `backend/requirements-cuda.txt`, and load
+them with ctypes RTLD_GLOBAL so ctranslate2's later dlopen calls resolve.
+This avoids needing LD_LIBRARY_PATH in the shell.
+
+On any box where requirements-cuda.txt was NOT installed (AMD-Linux,
+CPU-only Linux, macOS, Windows), `_site_packages()` finds no `nvidia/`
+subdir and `preload()` is a no-op. ctranslate2 then falls back to CPU
+without complaint as long as faster-whisper is initialized with
+`device='cpu'` (handled by app.services.transcribe._resolve_device).
 
 Import this module BEFORE `faster_whisper` (or anything that loads ctranslate2).
 """
