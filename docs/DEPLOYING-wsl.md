@@ -4,6 +4,10 @@ End-to-end install guide for running ConnectClips on a Windows PC using WSL2 and
 
 If you have a pure-Linux box, every command here that starts `sudo apt …` works the same — skip Step 1 and Step 9, and you're done.
 
+> **No NVIDIA GPU?** This guide assumes one. If your box has an AMD or Intel GPU instead, you have two paths:
+> - **Native Windows** is the recommended choice — see [DEPLOYING-windows.md](DEPLOYING-windows.md). Whisper runs through the Vulkan-built `whisper-cli` for GPU acceleration on Radeon iGPUs/dGPUs and h264 export uses `h264_amf` / `h264_qsv`. Faster end-to-end than WSL2 for AMD hardware.
+> - **WSL2 anyway** works too if you prefer Linux tooling. `scripts/install-wsl.sh` skips the CUDA wheel install when `nvidia-smi -L` doesn't report a GPU and defaults `WHISPER_MODEL=small` for the CPU `ctranslate2` fallback. Slower (a 60-min sermon transcribes in ~35 min) but functional. The Vulkan whisper.cpp bundle in [DEPLOYING-windows.md §4c](DEPLOYING-windows.md) also works in WSL2 via `/dev/dxg` paravirt with a ~10-20% perf hit vs Windows native — but install-wsl.sh doesn't wire that in automatically yet.
+
 ## What you'll have at the end
 
 - ConnectClips backend listening on `localhost:8765`
