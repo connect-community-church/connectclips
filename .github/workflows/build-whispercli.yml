@@ -93,10 +93,20 @@ jobs:
       - name: Configure
         working-directory: whisper.cpp
         shell: bash
+        # GGML_NATIVE=OFF + GGML_AVX512=OFF: don't tune the binary for the
+        # build host's CPU. GitHub runners have AVX-512 but most consumer
+        # AMD CPUs (Ryzen 6000 / 7000 series, including the Bosgame's
+        # 6900HX) do not. Without these flags the binary crashes with
+        # STATUS_ILLEGAL_INSTRUCTION (0xC000001D) on the user's box.
+        # AVX2 + FMA + F16C is the safe consumer-x86 baseline as of 2026.
         run: |
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DGGML_VULKAN=ON \
+            -DGGML_NATIVE=OFF \
+            -DGGML_AVX512=OFF \
+            -DGGML_AVX512_VBMI=OFF \
+            -DGGML_AVX512_VNNI=OFF \
             -DBUILD_SHARED_LIBS=OFF \
             -DWHISPER_BUILD_EXAMPLES=ON \
             -DWHISPER_BUILD_TESTS=OFF \
