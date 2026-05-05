@@ -460,10 +460,20 @@ function Step-NssmService {
     & nssm set $svc AppRotateBytes 10485760  # 10 MB rotation
     & nssm set $svc Start          SERVICE_AUTO_START
     & nssm set $svc Description    'ConnectClips backend (FastAPI/uvicorn)'
+
+    # Build the service environment overrides:
+    #  - PATH=<ffmpeg-dir>       so yt-dlp finds ffmpeg (NSSM appends to system PATH)
+    #  - USERPROFILE/HOME=<user> so backend's os.path.expanduser('~') resolves
+    #    to the install user's profile instead of LocalSystem's empty
+    #    C:\Windows\System32\config\systemprofile\ -- otherwise the YuNet
+    #    model and the ggml whisper models (both at ~/.cache/...) can't
+    #    be found at runtime.
+    $envExtras = @("USERPROFILE=$env:USERPROFILE", "HOME=$env:USERPROFILE")
     if ($ffmpegBin) {
-        & nssm set $svc AppEnvironmentExtra "PATH=$ffmpegBin"
-        Write-Log "  service PATH now includes $ffmpegBin"
+        $envExtras = @("PATH=$ffmpegBin") + $envExtras
     }
+    & nssm set $svc AppEnvironmentExtra @envExtras
+    Write-Log "  service env: HOME -> $env:USERPROFILE$(if ($ffmpegBin) { ' ; PATH += ' + $ffmpegBin })"
 
     & nssm start $svc
 
