@@ -600,7 +600,10 @@ def extract_identity_thumb(
         "-vf", f"crop={side_int}:{side_int}:{x}:{y},scale=192:192",
         str(out_path),
     ]
-    subprocess.run(cmd, check=True)
+    res = subprocess.run(cmd, capture_output=True)
+    if res.returncode != 0:
+        tail = res.stderr.decode("utf-8", errors="replace").strip().splitlines()[-8:]
+        raise RuntimeError(f"ffmpeg face-thumb failed (rc={res.returncode}):\n  " + "\n  ".join(tail))
     return out_path
 
 
@@ -624,7 +627,10 @@ def _ffmpeg_extract(source: Path, start: float, end: float, out: Path) -> None:
         "-pix_fmt", "yuv420p",
         str(out),
     ]
-    subprocess.run(cmd, check=True)
+    res = subprocess.run(cmd, capture_output=True)
+    if res.returncode != 0:
+        tail = res.stderr.decode("utf-8", errors="replace").strip().splitlines()[-12:]
+        raise RuntimeError(f"ffmpeg clip-extract failed (rc={res.returncode}):\n  " + "\n  ".join(tail))
 
 
 def _expand_to_per_frame(
@@ -770,8 +776,15 @@ def _encode(
         "-map", "0:v:0", "-map", "1:a:0?",
     ]
     if ass_path is not None:
+        # ffmpeg's filter parser uses `:` as the option separator within a
+        # filter, so a Windows path like `C:/Foo/bar.ass` makes ffmpeg think
+        # `C` is the filename and `/Foo/bar.ass` is the next option (it
+        # complains "Unable to parse original_size option value ..."). The
+        # standard fix is: forward-slash the path, backslash-escape the
+        # drive-letter colon, AND wrap the whole value in single quotes so
+        # ffmpeg parses it as one quoted filter-argument value.
         ff_path = str(ass_path).replace("\\", "/").replace(":", "\\:")
-        cmd += ["-vf", f"subtitles={ff_path}"]
+        cmd += ["-vf", f"subtitles='{ff_path}'"]
     cmd += [
         *plat.encoder_args(plat.H264_ENCODER, fast=False, bitrate_video="6M"),
         "-pix_fmt", "yuv420p",
@@ -780,8 +793,13 @@ def _encode(
         "-movflags", "+faststart",
         str(out_path),
     ]
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    # Capture stderr so a non-zero rc surfaces ffmpeg's actual diagnostic
+    # instead of swallowing it. Without this we just get a generic
+    # BrokenPipeError when our writer trips over ffmpeg's already-closed
+    # stdin and never learn why ffmpeg quit.
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     container = av.open(str(clip_path))
+    pipe_broken = False
     try:
         for idx, frame in enumerate(container.decode(video=0)):
             rgb = frame.to_ndarray(format="rgb24")
@@ -792,13 +810,28 @@ def _encode(
             cropped = rgb[y:y + ch_int, x:x + cw]
             scaled = cv2.resize(cropped, (OUT_W, OUT_H), interpolation=cv2.INTER_AREA)
             bgr = cv2.cvtColor(scaled, cv2.COLOR_RGB2BGR)
-            proc.stdin.write(bgr.tobytes())
+            try:
+                proc.stdin.write(bgr.tobytes())
+            except BrokenPipeError:
+                # ffmpeg already exited (failed encoder / bad filter / etc).
+                # Stop feeding frames, fall through to wait + report stderr.
+                pipe_broken = True
+                break
     finally:
         container.close()
-        proc.stdin.close()
+        try:
+            proc.stdin.close()
+        except BrokenPipeError:
+            pass
+        stderr_bytes = proc.stderr.read() if proc.stderr else b""
         proc.wait()
-    if proc.returncode != 0:
-        raise RuntimeError(f"ffmpeg encode failed (rc={proc.returncode})")
+    if proc.returncode != 0 or pipe_broken:
+        tail = stderr_bytes.decode("utf-8", errors="replace").strip().splitlines()[-12:]
+        msg = "\n  ".join(tail) if tail else "(no stderr captured)"
+        raise RuntimeError(
+            f"ffmpeg encode failed (rc={proc.returncode}, pipe_broken={pipe_broken}). "
+            f"Last stderr lines:\n  {msg}"
+        )
 
 
 def export_clip(
