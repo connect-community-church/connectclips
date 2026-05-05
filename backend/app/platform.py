@@ -69,8 +69,15 @@ PLATFORM: str = _platform.system()  # "Linux" / "Darwin" / "Windows"
 _INITIALIZED: bool = False
 
 
-def _detect_h264_encoder() -> str:
-    """Pick the best available h264 encoder. Returns 'libx264' on any error."""
+def _detect_h264_encoder(cuda_available: bool) -> str:
+    """Pick the best available h264 encoder. Returns 'libx264' on any error.
+
+    `cuda_available` matters because many ffmpeg builds (notably
+    Gyan.FFmpeg on Windows) list `h264_nvenc` in `ffmpeg -encoders` even
+    on boxes without an NVIDIA driver. The encoder appears
+    compile-time-available but actually using it fails with exit -1 at
+    runtime. Skip h264_nvenc unless the NVIDIA driver actually loaded.
+    """
     try:
         out = subprocess.run(
             ["ffmpeg", "-hide_banner", "-encoders"],
@@ -80,8 +87,12 @@ def _detect_h264_encoder() -> str:
         logger.warning("ffmpeg -encoders failed (%s); defaulting to libx264", exc)
         return "libx264"
     for candidate in _H264_PREFERENCE:
-        if candidate in out:
-            return candidate
+        if candidate not in out:
+            continue
+        if candidate == "h264_nvenc" and not cuda_available:
+            logger.info("ffmpeg lists h264_nvenc but no NVIDIA driver loaded -- skipping")
+            continue
+        return candidate
     return "libx264"
 
 
@@ -130,9 +141,11 @@ def initialize() -> dict:
     global H264_ENCODER, ORT_PROVIDERS, CUDA_AVAILABLE, _INITIALIZED
     if _INITIALIZED:
         return summary()
-    H264_ENCODER = _detect_h264_encoder()
-    ORT_PROVIDERS = _detect_ort_providers()
+    # Detect the NVIDIA driver first -- the h264 picker needs to know
+    # whether to honor a `h264_nvenc` listing in ffmpeg's encoder list.
     CUDA_AVAILABLE = _detect_cuda_available()
+    H264_ENCODER = _detect_h264_encoder(CUDA_AVAILABLE)
+    ORT_PROVIDERS = _detect_ort_providers()
     _INITIALIZED = True
     logger.info("platform: %s", summary())
     return summary()
