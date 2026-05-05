@@ -24,3 +24,6 @@ Thumbs.db
 # Local runtime artifacts (data lives outside the repo, but just in case)
 *.log
 /tmp/
+
+# Windows install drops the downloaded whisper-cli release here
+/bin/
