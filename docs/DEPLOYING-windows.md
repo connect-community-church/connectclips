@@ -558,6 +558,20 @@ in `.env` and confirm there are no smart quotes (some editors auto-
 substitute the regular `\` path separator with U+201C `"`). NSSM
 service needs a restart after `.env` changes (`nssm restart ConnectClips`).
 
+**YouTube job fails with `ffmpeg is not installed`** -- the NSSM
+service runs as LocalSystem and can't follow the per-user winget shim
+that `Gyan.FFmpeg` puts on PATH. `install-windows.ps1` writes the real
+ffmpeg directory into the service's PATH at install time, but if
+winget later upgrades ffmpeg the directory name changes (the version
+is baked in) and the service config goes stale. Recover with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\ConnectClips\scripts\fix-service-ffmpeg-path.ps1
+```
+
+That script re-resolves the current ffmpeg location and rewrites the
+service's `AppEnvironmentExtra`. Needs elevated PowerShell.
+
 **`Activate.ps1 cannot be loaded because running scripts is disabled`**
 -- run `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy
 RemoteSigned` once, in an unelevated PowerShell.

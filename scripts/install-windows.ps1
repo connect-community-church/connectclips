@@ -433,6 +433,25 @@ function Step-NssmService {
         Write-Fail "uvicorn.exe not found at $venvUvicorn -- venv install must have failed"
     }
 
+    # winget installs Gyan.FFmpeg into the user profile and adds a *shim*
+    # exe to %LOCALAPPDATA%\Microsoft\WinGet\Links. Shims work fine for
+    # interactive sessions but the NSSM service runs as LocalSystem and
+    # can't traverse them reliably. Resolve the real ffmpeg directory
+    # and bake it into the service's PATH so yt-dlp + ffmpeg find each
+    # other at runtime.
+    $ffmpegBin = $null
+    $wingetPkgs = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
+    if (Test-Path $wingetPkgs) {
+        $hit = Get-ChildItem $wingetPkgs -Recurse -Filter ffmpeg.exe -ErrorAction SilentlyContinue |
+                 Where-Object { $_.FullName -match 'Gyan\.FFmpeg' } |
+                 Select-Object -First 1
+        if ($hit) { $ffmpegBin = $hit.DirectoryName }
+    }
+    if (-not $ffmpegBin) {
+        Write-Warn '  could not locate ffmpeg.exe under WinGet packages -- service may not see ffmpeg'
+        Write-Warn '  if YouTube downloads fail with "ffmpeg not installed", run scripts\fix-service-ffmpeg-path.ps1'
+    }
+
     & nssm install $svc $venvUvicorn 'app.main:app' '--host' '0.0.0.0' '--port' $Port '--log-level' 'warning'
     & nssm set $svc AppDirectory   "$RepoDir\backend"
     & nssm set $svc AppStdout      $logPath
@@ -441,6 +460,10 @@ function Step-NssmService {
     & nssm set $svc AppRotateBytes 10485760  # 10 MB rotation
     & nssm set $svc Start          SERVICE_AUTO_START
     & nssm set $svc Description    'ConnectClips backend (FastAPI/uvicorn)'
+    if ($ffmpegBin) {
+        & nssm set $svc AppEnvironmentExtra "PATH=$ffmpegBin"
+        Write-Log "  service PATH now includes $ffmpegBin"
+    }
 
     & nssm start $svc
 
