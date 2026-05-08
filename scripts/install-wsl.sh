@@ -130,18 +130,37 @@ step_nvenc_check() {
         return
     fi
 
-    warn "  ffmpeg lacks NVENC — installing the ffmpeg7 PPA and replacing"
-    if ! have add-apt-repository; then
-        apt_ensure software-properties-common
+    # Both Ubuntu's archive ffmpeg AND the ubuntuhandbook1/ffmpeg7 PPA's
+    # Noble build ship without --enable-nvenc. The reliable source is
+    # BtbN's GPL static build, which has nvenc/nvdec/libx264/libass all
+    # baked in and runs fine inside WSL2 once the Windows-side NVIDIA
+    # driver is current. Drop into /usr/local/bin so the systemd unit's
+    # PATH (/usr/local/bin before /usr/bin) picks it up over the apt one.
+    warn "  ffmpeg lacks NVENC — installing BtbN's GPL static build to /usr/local/bin"
+    local btbn_url="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
+    local tmpdir; tmpdir="$(mktemp -d)"
+    if ! curl -sLf -o "$tmpdir/ffmpeg.tar.xz" "$btbn_url"; then
+        warn "  download failed from $btbn_url"
+        warn "  Encoding will fall back to libx264 (CPU). Install ffmpeg with NVENC manually."
+        rm -rf "$tmpdir"
+        return
     fi
-    sudo add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 >/dev/null
-    sudo apt-get update -qq >/dev/null
-    sudo apt-get install -y -qq ffmpeg >/dev/null
+    tar -xf "$tmpdir/ffmpeg.tar.xz" -C "$tmpdir" >/dev/null
+    local extracted; extracted="$(find "$tmpdir" -maxdepth 1 -type d -name 'ffmpeg-*' | head -1)"
+    if [[ -z "$extracted" ]] || [[ ! -x "$extracted/bin/ffmpeg" ]]; then
+        warn "  unexpected archive layout — bailing out, falling back to libx264"
+        rm -rf "$tmpdir"
+        return
+    fi
+    sudo install -m 755 "$extracted/bin/ffmpeg"  /usr/local/bin/ffmpeg
+    sudo install -m 755 "$extracted/bin/ffprobe" /usr/local/bin/ffprobe
+    rm -rf "$tmpdir"
+    hash -r  # force shell to re-resolve `ffmpeg` after the swap
 
     if ffmpeg -hide_banner -encoders 2>/dev/null | grep -q nvenc; then
-        log "  h264_nvenc now present"
+        log "  h264_nvenc now present (BtbN static build at /usr/local/bin)"
     else
-        warn "  ffmpeg still lacks NVENC after PPA install. Encoding will fall back to libx264 (CPU)."
+        warn "  ffmpeg still lacks NVENC after BtbN install — fallback to libx264 (CPU)."
     fi
 }
 
