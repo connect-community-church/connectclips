@@ -109,35 +109,37 @@ Reopen Ubuntu.
 ## Quick install (recommended)
 
 Once Step 1 is done — WSL2 + systemd up, `vmIdleTimeout=-1` set, NVIDIA
-driver current on the Windows side — sections 2 through 9 are automated
-by `scripts/install-wsl.sh`. Inside the Ubuntu shell:
+driver current on the Windows side — paste this inside the Ubuntu shell:
 
 ```bash
-cd ~
-git clone https://github.com/connect-community-church/connectclips.git ConnectClips
-cd ConnectClips
-./scripts/install-wsl.sh
+curl -fsSL https://raw.githubusercontent.com/connect-community-church/connectclips/main/scripts/bootstrap.sh | bash
 ```
 
-The script is idempotent (re-runnable if a step fails), prompts once for
-your Anthropic API key and an admin password, and finishes by enabling
-the `connectclips.service` systemd unit. Plan on **45–90 minutes**, mostly
-waiting on `pip install` to compile a few hundred MB of CUDA wheels.
+That one command:
+1. Detects you're on Linux/WSL.
+2. Installs `git` via apt if it isn't already there.
+3. Clones the repo into `~/ConnectClips`.
+4. Runs `scripts/install-wsl.sh`, which prompts once for your Anthropic API key and an admin password, then handles everything else.
 
-It does **not** touch the Windows side — Step 9d (Task Scheduler boot
-trigger), Step 9f (firewall rule), and Step 10 (Tailscale) still need to
-be done manually after the script finishes.
+The whole flow is idempotent — re-running the same command updates the repo (`git pull`) and re-runs the install script, which detects existing state and skips already-done work. Plan on **45-90 minutes**, mostly waiting on `pip install` to compile a few hundred MB of CUDA wheels (only on NVIDIA boxes; AMD / CPU-only Linux skips that download).
 
-To run the script non-interactively (e.g. in CI or scripted provisioning):
+The bootstrap does **not** touch the Windows side — Step 9d (Task Scheduler boot trigger), Step 9f (firewall rule), and Step 10 (Tailscale) still need to be done manually after the script finishes.
+
+To install somewhere other than `~/ConnectClips`:
+
+```bash
+CONNECTCLIPS_DIR=/opt/connectclips curl -fsSL https://raw.githubusercontent.com/connect-community-church/connectclips/main/scripts/bootstrap.sh | bash
+```
+
+To run non-interactively (e.g. in CI or scripted provisioning):
 
 ```bash
 export CONNECTCLIPS_API_KEY=sk-ant-...
 export CONNECTCLIPS_ADMIN_PASSWORD='your-admin-password'
-./scripts/install-wsl.sh
+curl -fsSL https://raw.githubusercontent.com/connect-community-church/connectclips/main/scripts/bootstrap.sh | bash
 ```
 
-If you want to understand each step, or you're debugging a failure, the
-manual walkthrough below is exactly what the script does.
+The manual walkthrough below is exactly what the bootstrap + install script do, in case you'd rather drive each step yourself or you're debugging a failure.
 
 ---
 

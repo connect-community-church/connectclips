@@ -46,30 +46,36 @@ Plan on **30-60 minutes** end-to-end.
 
 ## Quick install (recommended)
 
-If you're standing up a new Mac and just want this working, the
-sequence below — sections 1 through 11 — is automated by
-`scripts/install-mac.sh`. After cloning the repo:
+If you're standing up a new Mac and just want this working, paste this
+in Terminal:
 
 ```bash
-cd ~/ConnectClips
-./scripts/install-mac.sh
+curl -fsSL https://raw.githubusercontent.com/connect-community-church/connectclips/main/scripts/bootstrap.sh | bash
 ```
 
-The script is idempotent (re-runnable if a step fails), prompts once
-for your Anthropic API key and an admin password, and finishes by
-loading the launchd autostart agent. Plan on **20–40 minutes**, mostly
-waiting on `pip install` to compile `pywhispercpp`. If you want to
-understand each step, or you're debugging a failure, the manual
-walkthrough below covers exactly what the script does.
+That one command:
+1. Detects you're on macOS Apple Silicon.
+2. Verifies `git` is available (you may need to run `xcode-select --install` first if not — the bootstrap will tell you).
+3. Clones the repo into `~/ConnectClips`.
+4. Runs `scripts/install-mac.sh`, which prompts once for your Anthropic API key and an admin password, then handles everything else (Homebrew, Python, Node, ffmpeg, pywhispercpp, launchd autostart agent).
 
-To run the script non-interactively (e.g. in CI or remote
-provisioning), set the secrets in the environment first:
+Plan on **20-40 minutes**, mostly waiting on `pip install` to compile `pywhispercpp`. The whole flow is idempotent — re-running the same command updates the repo and re-runs the install script.
+
+To install somewhere other than `~/ConnectClips`:
+
+```bash
+CONNECTCLIPS_DIR=/Users/Shared/ConnectClips curl -fsSL https://raw.githubusercontent.com/connect-community-church/connectclips/main/scripts/bootstrap.sh | bash
+```
+
+To run non-interactively (e.g. in CI or remote provisioning), set the secrets in the environment first:
 
 ```bash
 export CONNECTCLIPS_API_KEY=sk-ant-...
 export CONNECTCLIPS_ADMIN_PASSWORD='your-admin-password'
-./scripts/install-mac.sh
+curl -fsSL https://raw.githubusercontent.com/connect-community-church/connectclips/main/scripts/bootstrap.sh | bash
 ```
+
+The manual walkthrough below is exactly what the bootstrap + install script do, in case you'd rather drive each step yourself or you're debugging a failure.
 
 ---
 

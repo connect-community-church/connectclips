@@ -78,34 +78,29 @@ throughput of the Linux/3060 Ti deployment on an M4 / 24 GB. See
 
 ## Quick start
 
-For a real install with autostart, follow the deploy guide for your platform: [WSL2 + NVIDIA](docs/DEPLOYING-wsl.md), [Windows native + AMD/Intel](docs/DEPLOYING-windows.md), or [macOS Apple Silicon](docs/DEPLOYING-mac.md). The 30-second manual version (Linux/WSL):
+For a real install with autostart, the bootstrap one-liners below pull the repo, install all prerequisites, set up the Windows Service / systemd unit / launchd agent, and prompt for your Anthropic API key + admin password. Plan on 20-40 min wall-clock depending on hardware.
 
-```bash
-git clone https://github.com/connect-community-church/connectclips.git
-cd connectclips
+**Windows native (AMD / Intel GPU or CPU)** — paste into an **elevated** PowerShell:
 
-# Backend
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # fill in ANTHROPIC_API_KEY, ADMIN_PASSWORD, SESSION_SECRET
-
-# Pre-fetch the YuNet face-detection model
-mkdir -p ~/.cache/connectclips
-curl -L -o ~/.cache/connectclips/face_detection_yunet_2023mar.onnx \
-  https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
-
-# Frontend
-cd ../frontend
-npm install
-npm run build
-
-# Run
-cd ../backend
-.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8765
+```powershell
+irm https://raw.githubusercontent.com/connect-community-church/connectclips/main/scripts/bootstrap.ps1 | iex
 ```
 
-Browse to <http://localhost:8765>.
+**Linux / WSL2 (NVIDIA or CPU-only)** — paste into a terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/connect-community-church/connectclips/main/scripts/bootstrap.sh | bash
+```
+
+**macOS (Apple Silicon)** — same command as Linux/WSL:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/connect-community-church/connectclips/main/scripts/bootstrap.sh | bash
+```
+
+The bootstrap detects your platform and dispatches to the right install script. For a step-by-step manual install or troubleshooting, see the deploy guide for your platform: [WSL2 + NVIDIA](docs/DEPLOYING-wsl.md), [Windows native + AMD/Intel](docs/DEPLOYING-windows.md), [macOS Apple Silicon](docs/DEPLOYING-mac.md).
+
+When the install finishes, browse to <http://localhost:8765>.
 
 ## How it works
 

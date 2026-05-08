@@ -54,31 +54,36 @@ Plan on **30-60 minutes** end-to-end, mostly waiting on `pip install` and
 
 ## Quick install (recommended)
 
-If you're standing up a new Windows box and just want this working, the
-sequence below is automated by `scripts\install-windows.ps1`. After
-cloning the repo:
+Open an **elevated** PowerShell (right-click → Run as Administrator) and paste:
 
 ```powershell
-cd C:\ConnectClips
-.\scripts\install-windows.ps1
+irm https://raw.githubusercontent.com/connect-community-church/connectclips/main/scripts/bootstrap.ps1 | iex
 ```
 
-The script is idempotent (re-runnable if a step fails), prompts once
-for your Anthropic API key and an admin password, and finishes by
-installing an NSSM autostart service. The NSSM step needs Administrator;
-the rest does not. If you launch the script as a regular user it will
-do everything except the service install and tell you to re-launch
-elevated for that one step.
+That one command:
+1. Verifies you're on Windows + admin + winget.
+2. Installs `git` if it isn't already there (winget).
+3. Clones the repo into `C:\ConnectClips`.
+4. Runs `scripts\install-windows.ps1`, which prompts once for your Anthropic API key and an admin password, then handles everything else.
+
+The whole flow is idempotent — re-running the same command updates the repo (`git pull`) and re-runs the install script, which detects existing state and skips already-done work. Plan on 20-30 minutes wall-clock on a fresh box, mostly downloads.
+
+To install somewhere other than `C:\ConnectClips`:
+
+```powershell
+$env:CONNECTCLIPS_DIR = 'D:\Apps\ConnectClips'
+irm https://raw.githubusercontent.com/connect-community-church/connectclips/main/scripts/bootstrap.ps1 | iex
+```
 
 To run non-interactively (e.g. provisioning):
 
 ```powershell
 $env:CONNECTCLIPS_API_KEY = 'sk-ant-...'
 $env:CONNECTCLIPS_ADMIN_PASSWORD = 'your-admin-password'
-.\scripts\install-windows.ps1
+irm https://raw.githubusercontent.com/connect-community-church/connectclips/main/scripts/bootstrap.ps1 | iex
 ```
 
-The manual walkthrough below covers exactly what the script does.
+The manual walkthrough below covers exactly what the bootstrap + install script do, in case you'd rather drive each step yourself or you're debugging a failure.
 
 ---
 
