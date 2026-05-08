@@ -10,26 +10,14 @@ anthropic==0.97.0
 opencv-python-headless
 numpy<2
 
-# CUDA runtime libs for ctranslate2 (faster-whisper backend on Linux+NVIDIA).
-# Preloaded by app.cuda_preload at import time. Skipped on macOS — Mac
-# uses the whispercpp backend instead, which doesn't need these.
-nvidia-cublas-cu12==12.9.2.10        ; sys_platform == 'linux'
-nvidia-cudnn-cu12==9.21.1.3          ; sys_platform == 'linux'
-nvidia-cuda-nvrtc-cu12==12.9.86      ; sys_platform == 'linux'
-nvidia-cuda-runtime-cu12             ; sys_platform == 'linux'
-nvidia-curand-cu12                   ; sys_platform == 'linux'
-nvidia-cufft-cu12                    ; sys_platform == 'linux'
-
-# YuNet face detection through ONNX Runtime. The -gpu wheel on Linux
-# carries CUDA support but falls back to CPUExecutionProvider cleanly
-# if there's no driver, so it's safe even on a CPU-only Linux box.
-# macOS gets the standard onnxruntime build with CoreML support.
-onnxruntime-gpu==1.25.1              ; sys_platform == 'linux'
-onnxruntime==1.25.1                  ; sys_platform == 'darwin'
+# YuNet face detection through ONNX Runtime. Default to the CPU build
+# everywhere — works on macOS (with CoreML), Windows native, and AMD/CPU
+# Linux. install-wsl.sh swaps this for onnxruntime-gpu on Linux+NVIDIA
+# boxes via requirements-cuda.txt.
+onnxruntime==1.25.1
 
 # whisper.cpp + Metal on Apple Silicon. Compiles from source on install
 # (needs Xcode Command Line Tools). Provides Metal-accelerated transcription
-# that closes most of the gap with NVIDIA + faster-whisper. On Linux we
-# stick with faster-whisper, so this isn't installed there.
+# that closes most of the gap with NVIDIA + faster-whisper. On Linux/Windows
+# we stick with faster-whisper, so this isn't installed there.
 pywhispercpp==1.3.3                  ; sys_platform == 'darwin'
-

@@ -1,0 +1,23 @@
+# CUDA-accelerated extras for Linux+NVIDIA boxes only.
+# Install on top of requirements.txt by install-wsl.sh when nvidia-smi
+# detects a working driver. Adds ~2 GB of CUDA libs — keep them out of
+# the base requirements.txt so AMD / CPU-only / macOS installs stay lean.
+#
+# IMPORTANT: install-wsl.sh `pip uninstall -y onnxruntime` first.
+# onnxruntime and onnxruntime-gpu both install into the same `onnxruntime`
+# import name and only the last one wins; mixing them produces hard-to-
+# diagnose load errors.
+
+# YuNet face detection on CUDA. Falls back to CPU cleanly if the driver
+# is missing at runtime, but we only install this when nvidia-smi works.
+onnxruntime-gpu==1.25.1
+
+# CUDA runtime libs for ctranslate2 (faster-whisper backend on Linux+NVIDIA).
+# Preloaded by app.cuda_preload at import time so ctranslate2's later dlopen
+# calls resolve without LD_LIBRARY_PATH gymnastics.
+nvidia-cublas-cu12==12.9.2.10
+nvidia-cudnn-cu12==9.21.1.3
+nvidia-cuda-nvrtc-cu12==12.9.86
+nvidia-cuda-runtime-cu12
+nvidia-curand-cu12
+nvidia-cufft-cu12

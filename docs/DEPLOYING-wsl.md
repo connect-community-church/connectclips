@@ -4,6 +4,10 @@ End-to-end install guide for running ConnectClips on a Windows PC using WSL2 and
 
 If you have a pure-Linux box, every command here that starts `sudo apt …` works the same — skip Step 1 and Step 9, and you're done.
 
+> **No NVIDIA GPU?** This guide assumes one. If your box has an AMD or Intel GPU instead, you have two paths:
+> - **Native Windows** is the recommended choice — see [DEPLOYING-windows.md](DEPLOYING-windows.md). Whisper runs through the Vulkan-built `whisper-cli` for GPU acceleration on Radeon iGPUs/dGPUs and h264 export uses `h264_amf` / `h264_qsv`. Faster end-to-end than WSL2 for AMD hardware.
+> - **WSL2 anyway** works too if you prefer Linux tooling. `scripts/install-wsl.sh` skips the CUDA wheel install when `nvidia-smi -L` doesn't report a GPU and defaults `WHISPER_MODEL=small` for the CPU `ctranslate2` fallback. Slower (a 60-min sermon transcribes in ~35 min) but functional. The Vulkan whisper.cpp bundle in [DEPLOYING-windows.md §4c](DEPLOYING-windows.md) also works in WSL2 via `/dev/dxg` paravirt with a ~10-20% perf hit vs Windows native — but install-wsl.sh doesn't wire that in automatically yet.
+
 ## What you'll have at the end
 
 - ConnectClips backend listening on `localhost:8765`
@@ -205,9 +209,15 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip wheel
 pip install -r requirements.txt
+
+# CUDA extras only on NVIDIA boxes (skip on AMD / CPU-only).
+if nvidia-smi -L | grep -q '^GPU'; then
+  pip uninstall -y onnxruntime onnxruntime-gpu  # avoid file-clobber between the two
+  pip install -r requirements-cuda.txt
+fi
 ```
 
-This pulls a few hundred MB of CUDA libraries (`nvidia-cudnn-cu12`, `nvidia-cublas-cu12`, etc.) for `faster-whisper` and `onnxruntime-gpu`. Expect 5–15 minutes.
+`requirements.txt` is the cross-platform CPU base — Whisper runs CPU-only here. The conditional `requirements-cuda.txt` block adds ~2 GB of CUDA libraries (`nvidia-cudnn-cu12`, `nvidia-cublas-cu12`, etc.) and `onnxruntime-gpu`, lighting up the GPU path for `faster-whisper` and YuNet. Expect 5–15 minutes for that block. `scripts/install-wsl.sh` does both steps for you and only runs the CUDA block when `nvidia-smi` reports a GPU.
 
 ### 5a. Pre-fetch the YuNet face-detection model
 

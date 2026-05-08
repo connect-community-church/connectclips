@@ -6,9 +6,12 @@ hardware-agnostic. Three things to detect:
   1. Which h264 encoder is available in the local ffmpeg build (NVENC on
      NVIDIA Linux/Windows, AMF on AMD Windows, QSV on Intel Windows,
      VideoToolbox on macOS, libx264 software fallback everywhere).
-  2. Which ONNX Runtime execution providers are installed (CUDA on Linux
-     with onnxruntime-gpu, CoreML on macOS, DirectML on Windows, CPU
-     everywhere).
+  2. Which ONNX Runtime execution providers are installed. The base
+     `onnxruntime` wheel that ships in requirements.txt only carries the
+     CPU provider (plus CoreML on macOS); the install scripts swap it
+     for `onnxruntime-gpu` on Linux+NVIDIA boxes, which adds CUDA. Other
+     providers (DirectML on Windows, ROCm on Linux+AMD) require swapping
+     to a different ORT wheel — not done by default.
   3. Whether the NVIDIA driver is actually loaded — onnxruntime-gpu lists
      CUDAExecutionProvider as available even on a box with no driver.
 
@@ -66,8 +69,15 @@ PLATFORM: str = _platform.system()  # "Linux" / "Darwin" / "Windows"
 _INITIALIZED: bool = False
 
 
-def _detect_h264_encoder() -> str:
-    """Pick the best available h264 encoder. Returns 'libx264' on any error."""
+def _detect_h264_encoder(cuda_available: bool) -> str:
+    """Pick the best available h264 encoder. Returns 'libx264' on any error.
+
+    `cuda_available` matters because many ffmpeg builds (notably
+    Gyan.FFmpeg on Windows) list `h264_nvenc` in `ffmpeg -encoders` even
+    on boxes without an NVIDIA driver. The encoder appears
+    compile-time-available but actually using it fails with exit -1 at
+    runtime. Skip h264_nvenc unless the NVIDIA driver actually loaded.
+    """
     try:
         out = subprocess.run(
             ["ffmpeg", "-hide_banner", "-encoders"],
@@ -77,8 +87,12 @@ def _detect_h264_encoder() -> str:
         logger.warning("ffmpeg -encoders failed (%s); defaulting to libx264", exc)
         return "libx264"
     for candidate in _H264_PREFERENCE:
-        if candidate in out:
-            return candidate
+        if candidate not in out:
+            continue
+        if candidate == "h264_nvenc" and not cuda_available:
+            logger.info("ffmpeg lists h264_nvenc but no NVIDIA driver loaded -- skipping")
+            continue
+        return candidate
     return "libx264"
 
 
@@ -127,9 +141,11 @@ def initialize() -> dict:
     global H264_ENCODER, ORT_PROVIDERS, CUDA_AVAILABLE, _INITIALIZED
     if _INITIALIZED:
         return summary()
-    H264_ENCODER = _detect_h264_encoder()
-    ORT_PROVIDERS = _detect_ort_providers()
+    # Detect the NVIDIA driver first -- the h264 picker needs to know
+    # whether to honor a `h264_nvenc` listing in ffmpeg's encoder list.
     CUDA_AVAILABLE = _detect_cuda_available()
+    H264_ENCODER = _detect_h264_encoder(CUDA_AVAILABLE)
+    ORT_PROVIDERS = _detect_ort_providers()
     _INITIALIZED = True
     logger.info("platform: %s", summary())
     return summary()

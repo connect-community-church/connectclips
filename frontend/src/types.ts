@@ -15,9 +15,21 @@ export type PreviousExport = {
   by_name: string | null
 }
 
+// Volunteer's per-clip edits saved to the backend so they survive
+// page navigation. Each field maps 1:1 to the export-clip request body.
+export type ClipUserEdits = {
+  start?: number
+  end?: number
+  caption_style?: string
+  // null means "no override" -- backend strips null fields before saving.
+  caption_margin_v?: number | null
+  include_hook_title?: boolean
+  identity_id?: number | null
+}
+
 export type Clip = {
-  start: number
-  end: number
+  start: number          // effective: Claude's value, overridden by user_edits.start if set
+  end: number            // effective
   title: string
   rationale: string
   hook_score?: number
@@ -29,6 +41,10 @@ export type Clip = {
   last_exported_by_login: string | null
   last_exported_by_name: string | null
   last_exported_at: string | null
+  // Edits the volunteer has saved for this clip. Empty object if none.
+  user_edits?: ClipUserEdits
+  // Claude's untouched start/end -- for a future "Reset to suggestion" button.
+  original?: { start: number; end: number }
 }
 
 export type Track = {

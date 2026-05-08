@@ -352,9 +352,29 @@ async def _run_transcribe(job: Job, src: Path) -> None:
 
 async def _run_youtube(job: Job, url: str) -> None:
     await _start(job)
+
+    import time
+    last = 0.0
+
+    def progress_cb(message: str, percent: float) -> None:
+        # Throttle to ~2 updates/s -- yt-dlp fires the hook on every chunk
+        # which would thrash the JSON job-state file otherwise.
+        nonlocal last
+        now = time.monotonic()
+        if now - last < 0.5 and percent < 1.0:
+            return
+        last = now
+        job.progress_message = message
+        job.progress_percent = max(0.0, min(1.0, percent))
+        _save(job)
+
     try:
-        out = await asyncio.to_thread(ingest.download_youtube, url, settings.data_sources_dir)
+        out = await asyncio.to_thread(
+            ingest.download_youtube, url, settings.data_sources_dir, progress_cb,
+        )
         job.ingested_filename = out.name
+        job.progress_percent = 1.0
+        job.progress_message = "Done"
         _save(job)
         _finish(job)
         # Auto-chain to transcribe so the volunteer doesn't have to babysit the pipeline.

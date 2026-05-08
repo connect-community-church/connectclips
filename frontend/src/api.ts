@@ -1,4 +1,4 @@
-import type { ClipsFile, IdentitiesResponse, Job, Me, Sermon, Track, TranscriptWord, UsageResponse } from './types'
+import type { ClipsFile, ClipUserEdits, IdentitiesResponse, Job, Me, Sermon, Track, TranscriptWord, UsageResponse } from './types'
 
 async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`/api${path}`, {
@@ -65,6 +65,19 @@ export const api = {
         include_hook_title, caption_margin_v, identity_id,
       }),
     }),
+
+  // Persist the volunteer's per-clip edits so they survive page navigation.
+  // The Trim view debounces calls to this on every input change.
+  saveClipOverride: (source: string, clip_index: number, edits: ClipUserEdits) =>
+    jsonFetch<{ saved: boolean }>(
+      `/sermons/${encodeURIComponent(source)}/clips/${clip_index}/overrides`,
+      { method: 'PUT', body: JSON.stringify(edits) },
+    ),
+  resetClipOverride: (source: string, clip_index: number) =>
+    jsonFetch<{ deleted: boolean }>(
+      `/sermons/${encodeURIComponent(source)}/clips/${clip_index}/overrides`,
+      { method: 'DELETE' },
+    ),
 
   // Preview-pane support — see backend/app/services/reframe.track_for_clip.
   // After the source-level prescan lands during ingest, this is a near-instant

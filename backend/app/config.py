@@ -17,10 +17,20 @@ class Settings(BaseSettings):
     whisper_compute_type: str = "int8"
     whisper_device: str = "auto"
     # Which Whisper implementation to use:
-    #   auto           — whispercpp on macOS, ctranslate2 elsewhere
-    #   ctranslate2    — faster-whisper (CTranslate2 + CUDA on Linux)
-    #   whispercpp     — pywhispercpp (whisper.cpp + Metal on Apple Silicon)
+    #   auto           -- whispercpp on macOS, whispercli when whisper-cli
+    #                     is on PATH (or WHISPER_CLI_PATH set), else ctranslate2
+    #   ctranslate2    -- faster-whisper (CTranslate2 + CUDA on Linux+NVIDIA)
+    #   whispercpp     -- pywhispercpp (whisper.cpp + Metal on Apple Silicon)
+    #   whispercli     -- our pre-built whisper.cpp Vulkan binary, subprocessed
     whisper_backend: str = "auto"
+
+    # whispercli backend: path to the whisper-cli(.exe) binary and the dir
+    # holding ggml-<model>.bin files. Empty = look on PATH for the binary
+    # and ~/.cache/whisper.cpp/ for the models. install-windows.ps1 sets
+    # both explicitly when it downloads the pre-built bundle from a
+    # ConnectClips release.
+    whisper_cli_path: str = ""
+    whisper_model_dir: str = ""
 
     # Admin-mode password and the secret used to sign the admin session cookie.
     # If session_secret is empty, the SessionMiddleware will refuse to start —

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.identity import get_user
 from app.routers.auth import require_admin
-from app.services import captions, clip_selection, ingest, jobs, reframe
+from app.services import captions, clip_overrides, clip_selection, ingest, jobs, reframe
 from app.services.transcribe import transcript_path_for
 
 
@@ -160,6 +160,12 @@ def get_clips(name: str) -> dict:
         raise HTTPException(status_code=404, detail="clips.json not found (run select-clips first)")
     data = json.loads(clips_path.read_text())
     current_version = data.get("clips_version")
+    # Stamp each clip with `user_edits` (the override dict, possibly empty)
+    # and `original` (Claude's untouched start/end), and apply any start/end
+    # override into the effective clip values so the frontend's existing
+    # use-clip.start / use-clip.end paths work unchanged.
+    overrides = clip_overrides.load_overrides(name)
+    clip_overrides.merge_into_clips(data.get("clips", []), overrides)
     for i, clip in enumerate(data.get("clips", [])):
         # Current-version export: file exists at the versioned path.
         out = _exported_clip_path(name, i, current_version)
@@ -193,6 +199,45 @@ def get_clips(name: str) -> dict:
         clip["last_exported_by_name"] = last.user_name if (last and is_current) else None
         clip["last_exported_at"] = last.finished_at if (last and is_current) else None
     return data
+
+
+class ClipOverridesIn(BaseModel):
+    """Per-clip user edits. Field names + types match the export-clip
+    request body so the frontend can persist the same shape it would
+    later send to /api/jobs/export-clip. A null value means "no
+    override -- use the default" and is stripped from the saved file."""
+    start: float | None = None
+    end: float | None = None
+    caption_style: str | None = None
+    caption_margin_v: int | None = None
+    include_hook_title: bool | None = None
+    identity_id: int | None = None
+
+
+@router.put("/{name}/clips/{clip_index}/overrides")
+def put_clip_overrides(name: str, clip_index: int, body: ClipOverridesIn) -> dict:
+    """Save (upsert) the volunteer's edits for one clip.
+
+    Validates that the clip index actually exists in the current
+    clips.json so a stale frontend can't write phantom keys. The
+    Trim page calls this debounced as the volunteer changes start /
+    end / caption style / etc.
+    """
+    clips_path = clip_selection.clips_path_for(name)
+    if not clips_path.exists():
+        raise HTTPException(status_code=404, detail="clips.json not found")
+    n = len(json.loads(clips_path.read_text()).get("clips", []))
+    if clip_index < 0 or clip_index >= n:
+        raise HTTPException(status_code=404, detail=f"clip {clip_index} out of range")
+    clip_overrides.save_override(name, clip_index, body.model_dump())
+    return {"saved": True}
+
+
+@router.delete("/{name}/clips/{clip_index}/overrides")
+def delete_clip_overrides(name: str, clip_index: int) -> dict:
+    """Reset this clip back to Claude's suggestion (no overrides)."""
+    clip_overrides.delete_override(name, clip_index)
+    return {"deleted": True}
 
 
 @router.post("/upload", status_code=201)
