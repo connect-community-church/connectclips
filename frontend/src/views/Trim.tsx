@@ -59,6 +59,10 @@ function parseTime(input: string): number | null {
 }
 
 export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
+  // clip.start / clip.end already have any saved start/end override applied
+  // by the backend. The other override fields live in clip.user_edits.
+  const userEdits = clip.user_edits ?? {}
+
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [start, setStart] = useState(clip.start)
   const [end, setEnd] = useState(clip.end)
@@ -72,23 +76,36 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
   const [exportJob, setExportJob] = useState<Job | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [styles, setStyles] = useState<{ key: string; label: string }[]>([])
-  const [styleKey, setStyleKey] = useState<string>('classic')
-  const [includeHookTitle, setIncludeHookTitle] = useState(true)
+  // If the volunteer previously picked a style for this clip, start there;
+  // otherwise the captionStyles() effect below sets the backend's default.
+  const [styleKey, setStyleKey] = useState<string>(userEdits.caption_style ?? 'classic')
+  const [includeHookTitle, setIncludeHookTitle] = useState<boolean>(
+    userEdits.include_hook_title ?? true,
+  )
   // Volunteer's drag-set caption position (px from bottom in 1080×1920 frame).
   // null = use the picked style's default. Resets to null when style changes
   // because each style has a different ideal default position.
-  const [captionMarginV, setCaptionMarginV] = useState<number | null>(null)
+  const [captionMarginV, setCaptionMarginV] = useState<number | null>(
+    userEdits.caption_margin_v ?? null,
+  )
   const [identities, setIdentities] = useState<Identity[]>([])
   const [identityScanned, setIdentityScanned] = useState(false)
   // null = "auto" (highest-score live face per sample). Set to an id when the
   // volunteer picks a specific face from the strip; the picker only shows up
   // if the scan found more than one identity.
-  const [identityId, setIdentityId] = useState<number | null>(null)
+  const [identityId, setIdentityId] = useState<number | null>(
+    userEdits.identity_id ?? null,
+  )
 
   useEffect(() => {
     api.captionStyles()
-      .then((r) => { setStyles(r.styles); setStyleKey(r.default) })
+      .then((r) => {
+        setStyles(r.styles)
+        // Don't clobber a saved style choice with the backend default.
+        if (userEdits.caption_style == null) setStyleKey(r.default)
+      })
       .catch(() => { /* fall back to none — backend uses default */ })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Identities for this sermon. Poll while scan is in progress so the picker
@@ -115,10 +132,58 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
     }
   }, [sermon.name])
 
+  // userInteracted gates two things:
+  //   1. The "reset margin on style change" effect below -- otherwise a
+  //      saved caption_margin_v would get nuked on mount when the
+  //      captionStyles fetch lands.
+  //   2. The "PUT overrides" effect further down -- we don't want to
+  //      write default-state overrides on mount.
+  // markDirty() flips it true on any user-driven setState.
+  const userInteracted = useRef(false)
+  const markDirty = () => { userInteracted.current = true }
+
+  // User-driven setters: identical signatures to the underlying useState
+  // setters, but additionally flip userInteracted so the save + reset
+  // effects know this came from a real volunteer action (not the
+  // captionStyles fetch landing on mount). The system-driven setStyleKey
+  // call inside the captionStyles fetch deliberately uses the plain
+  // setter so it doesn't trip these.
+  const setStartU: typeof setStart = (v) => { setStart(v); markDirty() }
+  const setEndU: typeof setEnd = (v) => { setEnd(v); markDirty() }
+  const setStyleKeyU: typeof setStyleKey = (v) => { setStyleKey(v); markDirty() }
+  const setIncludeHookTitleU: typeof setIncludeHookTitle = (v) => { setIncludeHookTitle(v); markDirty() }
+  const setCaptionMarginVU: typeof setCaptionMarginV = (v) => { setCaptionMarginV(v); markDirty() }
+  const setIdentityIdU: typeof setIdentityId = (v) => { setIdentityId(v); markDirty() }
+
   // Reset caption position override when the volunteer picks a different style.
   // Different styles have different default positions and chunk sizes; carrying
-  // a previous style's offset usually puts captions in the wrong place.
-  useEffect(() => { setCaptionMarginV(null) }, [styleKey])
+  // a previous style's offset usually puts captions in the wrong place. Only
+  // run on user-driven changes -- not on the captionStyles-fetch-driven mount.
+  useEffect(() => {
+    if (!userInteracted.current) return
+    setCaptionMarginV(null)
+  }, [styleKey])
+
+  useEffect(() => {
+    if (!userInteracted.current) return
+    const t = setTimeout(() => {
+      api.saveClipOverride(sermon.name, clipIndex, {
+        start, end,
+        caption_style: styleKey,
+        include_hook_title: includeHookTitle,
+        caption_margin_v: captionMarginV,
+        identity_id: identityId,
+      }).catch((e) => {
+        // Network blip / backend hiccup; the next debounced write will
+        // catch up. Surface in the dev console rather than blocking export.
+        console.warn('saveClipOverride failed', e)
+      })
+    }, 500)
+    return () => clearTimeout(t)
+  }, [
+    sermon.name, clipIndex,
+    start, end, styleKey, includeHookTitle, captionMarginV, identityId,
+  ])
 
   // Position the source video at start when clip changes
   useEffect(() => {
@@ -143,7 +208,7 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
       return
     }
     const next = Math.max(0, Math.min(parsed, end - 0.1))
-    setStart(next)
+    setStartU(next)
     setStartText(formatTime(next))
   }
   const commitEnd = () => {
@@ -153,7 +218,7 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
       return
     }
     const next = Math.max(start + 0.1, parsed)
-    setEnd(next)
+    setEndU(next)
     setEndText(formatTime(next))
   }
 
@@ -185,11 +250,11 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
 
   const setInToCurrent = () => {
     const v = videoRef.current
-    if (v) setStart(parseFloat(v.currentTime.toFixed(2)))
+    if (v) setStartU(parseFloat(v.currentTime.toFixed(2)))
   }
   const setOutToCurrent = () => {
     const v = videoRef.current
-    if (v) setEnd(parseFloat(v.currentTime.toFixed(2)))
+    if (v) setEndU(parseFloat(v.currentTime.toFixed(2)))
   }
   const seekTo = (t: number) => {
     const v = videoRef.current
@@ -316,8 +381,8 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
                 placeholder="M:SS.cc"
                 size={8}
               />
-              <button onClick={() => setStart((s) => Math.max(0, s - NUDGE_STEP))}>−0.1s</button>
-              <button onClick={() => setStart((s) => s + NUDGE_STEP)}>+0.1s</button>
+              <button onClick={() => setStartU((s) => Math.max(0, s - NUDGE_STEP))}>−0.1s</button>
+              <button onClick={() => setStartU((s) => s + NUDGE_STEP)}>+0.1s</button>
               <button onClick={setInToCurrent} title="Set start to current playhead">⤓ playhead</button>
               <button onClick={() => seekTo(start)} title="Jump video to current start">⏮ go</button>
             </div>
@@ -333,8 +398,8 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
                 placeholder="M:SS.cc"
                 size={8}
               />
-              <button onClick={() => setEnd((s) => Math.max(start + 0.1, s - NUDGE_STEP))}>−0.1s</button>
-              <button onClick={() => setEnd((s) => s + NUDGE_STEP)}>+0.1s</button>
+              <button onClick={() => setEndU((s) => Math.max(start + 0.1, s - NUDGE_STEP))}>−0.1s</button>
+              <button onClick={() => setEndU((s) => s + NUDGE_STEP)}>+0.1s</button>
               <button onClick={setOutToCurrent} title="Set end to current playhead">⤓ playhead</button>
               <button onClick={() => seekTo(Math.max(0, end - 0.05))} title="Jump video to just before current end">⏭ go</button>
             </div>
@@ -351,21 +416,21 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
                 <CaptionStylePicker
                   styles={styles}
                   value={styleKey}
-                  onChange={setStyleKey}
+                  onChange={setStyleKeyU}
                 />
               )}
               <label className="hook-toggle" title="Burn the clip's hook title on screen for the first 2s">
                 <input
                   type="checkbox"
                   checked={includeHookTitle}
-                  onChange={(e) => setIncludeHookTitle(e.target.checked)}
+                  onChange={(e) => setIncludeHookTitleU(e.target.checked)}
                 />
                 Hook title overlay
               </label>
               {captionMarginV !== null && (
                 <button
                   className="secondary"
-                  onClick={() => setCaptionMarginV(null)}
+                  onClick={() => setCaptionMarginVU(null)}
                   title="Reset caption position to the style's default"
                 >
                   Reset position
@@ -393,7 +458,7 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
             sourceVideoRef={videoRef}
             captionStyleKey={styleKey}
             captionMarginV={captionMarginV}
-            onCaptionMarginVChange={setCaptionMarginV}
+            onCaptionMarginVChange={setCaptionMarginVU}
             includeHookTitle={includeHookTitle}
             hookTitle={clip.title}
             identityId={identityId}
@@ -405,7 +470,7 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
               <div className="face-picker-row">
                 <button
                   className={`face-thumb auto ${identityId === null ? 'selected' : ''}`}
-                  onClick={() => setIdentityId(null)}
+                  onClick={() => setIdentityIdU(null)}
                   title="Auto: follow the most prominent face per moment"
                 >
                   Auto
@@ -414,7 +479,7 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
                   <button
                     key={id.id}
                     className={`face-thumb ${identityId === id.id ? 'selected' : ''}`}
-                    onClick={() => setIdentityId(id.id)}
+                    onClick={() => setIdentityIdU(id.id)}
                     title={`Identity ${id.id} · ${id.n_samples} samples`}
                   >
                     <img

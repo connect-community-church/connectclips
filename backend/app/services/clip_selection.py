@@ -206,4 +206,10 @@ def write_clips(result: dict) -> Path:
     out = clips_path_for(result["source"])
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=2))
+    # Wipe any per-clip user edits left over from a previous Claude
+    # generation -- clip indices in the new clips.json don't line up
+    # with what the volunteer was editing, so the cleanest semantics
+    # for "re-suggest clips" is "start fresh".
+    from app.services import clip_overrides
+    clip_overrides.delete_all(result["source"])
     return out
