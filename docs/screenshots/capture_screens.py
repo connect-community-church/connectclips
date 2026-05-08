@@ -8,7 +8,12 @@ The admin-password-prompt screenshot is taken from a second context with
 no headers, since that flow only appears when identity is missing.
 
 Reads ADMIN_PASSWORD from backend/.env (so we don't leak it to logs).
+The test sermon is auto-picked from the first entry the running backend
+returns at /api/sermons -- previously hardcoded, which broke the script
+when run on a different box.
 """
+import json
+import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -21,7 +26,20 @@ OUT = _REPO / "docs" / "screenshots"
 ENV_FILE = _REPO / "backend" / ".env"
 BASE = "http://127.0.0.1:8765"
 
-SERMON = "Keep_Your_Eyes_on_the_Hill_Exodus_17_Trials_to_Freedom_Series-XD8AEeSmFew.mp4"
+def first_sermon_name() -> str:
+    """Pick whichever sermon the backend currently has -- ideally the
+    one that's already transcribed + clipped + has at least one export
+    (so screenshots 03-08 land on a fully-populated state). Falls back
+    to the first sermon if none match."""
+    with urllib.request.urlopen(f"{BASE}/api/sermons", timeout=5) as r:
+        items = json.loads(r.read())
+    if not items:
+        raise RuntimeError("backend has no sermons; capture script needs at least one")
+    fully = [s for s in items if s.get("clips_selected") and s.get("transcribed")]
+    return (fully[0] if fully else items[0])["name"]
+
+
+SERMON = first_sermon_name()
 
 # Headers Tailscale Serve injects. Login must match ADMIN_TAILSCALE_LOGINS
 # in backend/.env so identity-based admin engages.
