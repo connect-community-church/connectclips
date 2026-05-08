@@ -76,6 +76,9 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
   const [exportJob, setExportJob] = useState<Job | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [styles, setStyles] = useState<{ key: string; label: string }[]>([])
+  // Backend's default style key. Captured at captionStyles fetch time so the
+  // Reset-to-suggestion handler can restore it after wiping overrides.
+  const [defaultStyleKey, setDefaultStyleKey] = useState<string>('classic')
   // If the volunteer previously picked a style for this clip, start there;
   // otherwise the captionStyles() effect below sets the backend's default.
   const [styleKey, setStyleKey] = useState<string>(userEdits.caption_style ?? 'classic')
@@ -101,6 +104,7 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
     api.captionStyles()
       .then((r) => {
         setStyles(r.styles)
+        setDefaultStyleKey(r.default)
         // Don't clobber a saved style choice with the backend default.
         if (userEdits.caption_style == null) setStyleKey(r.default)
       })
@@ -283,6 +287,27 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
     }
   }
 
+  // Wipe this clip's saved overrides + revert local state to Claude's
+  // suggestion (and the system defaults for the non-Claude fields). Plain
+  // setters + clearing userInteracted so the debounced save effect doesn't
+  // immediately re-PUT the just-cleared state.
+  const onResetToSuggestion = async () => {
+    setError(null)
+    try {
+      await api.resetClipOverride(sermon.name, clipIndex)
+    } catch (e) {
+      setError(`Reset failed: ${e}`)
+      return
+    }
+    userInteracted.current = false
+    setStart(clip.original?.start ?? clip.start)
+    setEnd(clip.original?.end ?? clip.end)
+    setStyleKey(defaultStyleKey)
+    setIncludeHookTitle(true)
+    setCaptionMarginV(null)
+    setIdentityId(null)
+  }
+
   // Decide whether to show the face picker.
   //
   // Two failure modes the heuristic has to dodge, both stemming from the
@@ -434,6 +459,22 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
                   title="Reset caption position to the style's default"
                 >
                   Reset position
+                </button>
+              )}
+              {(
+                start !== (clip.original?.start ?? clip.start) ||
+                end !== (clip.original?.end ?? clip.end) ||
+                styleKey !== defaultStyleKey ||
+                !includeHookTitle ||
+                captionMarginV !== null ||
+                identityId !== null
+              ) && (
+                <button
+                  className="secondary"
+                  onClick={onResetToSuggestion}
+                  title="Discard your edits and revert this clip to Claude's original suggestion"
+                >
+                  Reset to suggestion
                 </button>
               )}
               <button className="primary" onClick={onExport} disabled={!!exporting}>
