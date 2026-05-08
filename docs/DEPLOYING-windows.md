@@ -8,7 +8,7 @@ without needing CUDA / WSL2.
 
 > **Status: experimental.** The Linux/WSL2 path is the production-tested
 > deployment for boxes with an NVIDIA GPU. The Windows-native path was
-> added in v0.3 and validated on a Bosgame EffiZen mini PC (Ryzen 9
+> added in v0.4 and validated on a Bosgame EffiZen mini PC (Ryzen 9
 > 6900HX + Radeon 680M iGPU, 32 GB RAM). On that hardware:
 >
 > - Whisper transcription via the bundled `whisper-cli` (Vulkan): RTR
