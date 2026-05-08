@@ -31,7 +31,7 @@ See [`docs/operator-manual.md`](docs/operator-manual.md) for the full volunteer 
 
 ## Hardware requirements
 
-Two supported deployment paths:
+Three supported deployment paths:
 
 ### Linux / Windows + WSL2 with NVIDIA (production-tested)
 
@@ -45,6 +45,22 @@ Two supported deployment paths:
 
 Uses faster-whisper (CTranslate2 + CUDA), ONNX Runtime CUDA, and NVENC.
 See [docs/DEPLOYING-wsl.md](docs/DEPLOYING-wsl.md).
+
+### Windows native — AMD / Intel GPU or CPU (experimental, v0.4+)
+
+| Component | Minimum | Notes |
+|---|---|---|
+| GPU | Any AMD GPU (incl. iGPU) or Intel iGPU | Vulkan acceleration via `whisper.cpp`; CPU-only also works |
+| CPU | Modern x86_64 (no AVX-512 required) | Ryzen 5000+ / 12th-gen Core+ recommended |
+| RAM | 16 GB | 32 GB comfortable |
+| Disk | 100 GB free | Same as above |
+| OS | Windows 11 (build 22000+) | Windows 10 untested |
+
+Uses a pre-built Vulkan `whisper.cpp` binary for transcription (`whispercli`
+backend), `h264_amf` / `h264_qsv` for hardware encode, and runs as an NSSM
+Windows Service. Validated on a Bosgame EffiZen mini-PC (Ryzen 9 6900HX +
+Radeon 680M iGPU): 60-min sermon → ~25-30 min full pipeline. See
+[docs/DEPLOYING-windows.md](docs/DEPLOYING-windows.md).
 
 ### macOS Apple Silicon (experimental)
 
@@ -60,11 +76,9 @@ face detection, and VideoToolbox for h264 encode. Roughly 70-80% the
 throughput of the Linux/3060 Ti deployment on an M4 / 24 GB. See
 [docs/DEPLOYING-mac.md](docs/DEPLOYING-mac.md).
 
-AMD / Intel GPU paths and a fully-CPU fallback are still on the roadmap.
-
 ## Quick start
 
-For a real install with autostart, follow [`docs/DEPLOYING-wsl.md`](docs/DEPLOYING-wsl.md). The 30-second version:
+For a real install with autostart, follow the deploy guide for your platform: [WSL2 + NVIDIA](docs/DEPLOYING-wsl.md), [Windows native + AMD/Intel](docs/DEPLOYING-windows.md), or [macOS Apple Silicon](docs/DEPLOYING-mac.md). The 30-second manual version (Linux/WSL):
 
 ```bash
 git clone https://github.com/connect-community-church/connectclips.git
@@ -115,7 +129,7 @@ Browse to <http://localhost:8765>.
 - **Backend**: Python 3.12 / FastAPI / SQLite (jobs persistence) / asyncio (in-process pipeline)
 - **Frontend**: Vite + React (single-page app, served as static dist by the backend)
 - **AI**: `faster-whisper` (transcription), Anthropic Claude API (clip selection + hook scoring), YuNet via ONNX Runtime (face detection)
-- **Video**: PyAV (decode) + FFmpeg + `h264_nvenc` (encode); ASS subtitles for captions
+- **Video**: PyAV (decode) + FFmpeg with whichever h264 encoder the box has (`h264_nvenc` / `h264_amf` / `h264_qsv` / `h264_videotoolbox` / `libx264`); ASS subtitles for captions
 - **Auth**: Tailscale Serve identity headers, with an `ADMIN_PASSWORD` fallback. No public exposure required.
 
 ### Pipeline auto-chains
@@ -126,22 +140,23 @@ The pre-scan runs YuNet over the entire source once at ingest time. Trim adjustm
 
 ## Status
 
-**Pre-1.0.** Working end-to-end and in real use at one church. The Linux/NVIDIA path is production-tested; the macOS path is experimental but validated end-to-end on M-series hardware. See the [GitHub releases page](../../releases) for the latest tag.
+**Pre-1.0.** Working end-to-end and in real use at one church. The Linux/NVIDIA path is production-tested; the Windows-native (AMD / Intel) path was added in v0.4 and validated on a Bosgame EffiZen mini-PC; the macOS path is experimental but validated end-to-end on M-series hardware. See the [GitHub releases page](../../releases) for the latest tag.
 
 Known limitations:
 
-- **NVIDIA or Apple Silicon required** — CPU-only fallback works (slowly) on Linux but isn't tuned. Native Windows (no WSL) and AMD / Intel GPU paths are on the roadmap.
 - **Multi-speaker face picker** — fragments across ATEM full-frame ↔ PiP layout switches because the matcher doesn't use face embeddings yet. Auto-pick (highest-score live face per sample) handles single-pastor sermons correctly, which covers the common case.
-- **macOS deployment is experimental** — the install path is documented and code paths exist, but the operator manual still references the Linux/WSL2 deployment for screenshots / autostart.
+- **macOS and Windows-native deployments are experimental** — install paths are documented and code paths exist, but the operator manual still references the Linux/WSL2 deployment for screenshots / autostart.
 
 See the [issues](../../issues) for what's actively tracked.
 
 ## Roadmap
 
 - ~~Native macOS deployment (Apple Silicon: `whisper.cpp` + Metal + VideoToolbox)~~ — landed in v0.2, experimental
-- CPU-only fallback path tuned for non-GPU hardware
+- ~~Native Windows + AMD / Intel paths (Vulkan `whisper.cpp` + `h264_amf` / `h264_qsv`)~~ — landed in v0.4, experimental
+- ~~CPU-only fallback path tuned for non-GPU hardware~~ — covered by the Vulkan-`whisper.cpp` binary's CPU mode in v0.4 (~3× faster than the previous `faster-whisper int8` baseline)
+- Service-window gate: admin schedule so the backend doesn't fight WorshipTools Presenter for CPU during a service
+- DirectML provider for ONNX Runtime so YuNet face detection runs on the GPU on Windows-native (currently CPU there)
 - Face-embedding-based re-identification (drop-in InsightFace ONNX) so the multi-face picker works across layout shifts
-- Native Windows / AMD / Intel paths via DirectML execution provider + `h264_amf` / `h264_qsv`
 - Multiple ingest sources beyond YouTube and direct upload (Vimeo, raw stream archives, RTMP capture)
 
 ## Contributing
