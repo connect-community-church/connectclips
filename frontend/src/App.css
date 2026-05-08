@@ -987,6 +987,72 @@ input[type="number"] {
   .balance-empty .balance-actions { flex-direction: column; }
 }
 
+/* Settings page — admin-only config. Roomier than the inline forms
+   because it's a destination view, not a strip alongside other UI. */
+.settings-page {
+  max-width: 640px;
+  padding-top: 8px;
+}
+.settings-page h2 { margin: 16px 0 24px; }
+.settings-page h3 { margin: 20px 0 8px; font-size: 15px; }
+.settings-page > p,
+.settings-form > p {
+  margin: 0 0 20px;
+  line-height: 1.5;
+}
+
+.settings-form {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px 22px 22px;
+  margin: 16px 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.settings-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.settings-form label > span {
+  color: var(--fg);
+  font-weight: 500;
+  font-size: 14px;
+}
+.settings-form input[type="text"] {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 14px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.settings-form input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.settings-form small {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.settings-form small code {
+  background: var(--bg);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.settings-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 4px;
+}
+
 /* Top-up history — collapsible. */
 .topup-history { margin: 12px 0 18px; }
 .topup-history summary {
