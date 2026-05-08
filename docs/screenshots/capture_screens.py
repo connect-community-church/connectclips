@@ -13,7 +13,12 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-OUT = Path("/home/connectadmin/ConnectClips/docs/screenshots")
+# Resolve everything relative to this script so the same code works on
+# the streaming-pc (under ~/ConnectClips on WSL) and the Bosgame (under
+# C:\ConnectClips). Previously hardcoded to /home/connectadmin/...
+_REPO = Path(__file__).resolve().parents[2]
+OUT = _REPO / "docs" / "screenshots"
+ENV_FILE = _REPO / "backend" / ".env"
 BASE = "http://127.0.0.1:8765"
 
 SERMON = "Keep_Your_Eyes_on_the_Hill_Exodus_17_Trials_to_Freedom_Series-XD8AEeSmFew.mp4"
@@ -28,8 +33,9 @@ TS_HEADERS = {
 
 
 def read_admin_password() -> str:
-    env_file = Path("/home/connectadmin/ConnectClips/backend/.env")
-    for line in env_file.read_text().splitlines():
+    if not ENV_FILE.is_file():
+        return ""
+    for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
         if line.startswith("ADMIN_PASSWORD="):
             return line.split("=", 1)[1].strip()
     return ""
@@ -133,6 +139,21 @@ def capture_identity_pass(p):
     page.wait_for_timeout(800)  # let any in-flight progress refresh paint
     page.screenshot(path=str(OUT / "11-activity.png"))
     print("  11-activity.png")
+
+    # 12 — Usage page (admin-only) — Anthropic spend per sermon + balance.
+    # The Usage button is the third nav button after History and Activity.
+    page.locator("button:has-text('Usage')").click()
+    page.wait_for_selector(".usage-summary, .usage-table")
+    page.wait_for_timeout(800)
+    page.screenshot(path=str(OUT / "12-usage.png"))
+    print("  12-usage.png")
+
+    # 13 — Settings page (admin-only) — publish-target IDs.
+    page.locator("button:has-text('Settings')").click()
+    page.wait_for_selector(".settings-form")
+    page.wait_for_timeout(500)
+    page.screenshot(path=str(OUT / "13-settings.png"))
+    print("  13-settings.png")
 
     browser.close()
 

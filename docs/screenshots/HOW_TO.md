@@ -1,6 +1,6 @@
 # Screenshot capture guide
 
-The operator manual references 11 screenshots. The easiest way to refresh them is to run the included Playwright script (`capture_screens.py`), which drives the SPA through every state and saves the PNGs in the right place. Manual capture is also fine if you want to tweak a single shot.
+The operator manual references 13 screenshots. The easiest way to refresh them is to run the included Playwright script (`capture_screens.py`), which drives the SPA through every state and saves the PNGs in the right place. Manual capture is also fine if you want to tweak a single shot.
 
 ## Automated capture (preferred)
 
@@ -10,9 +10,11 @@ python3 -m venv /tmp/pw-venv
 /tmp/pw-venv/bin/pip install playwright
 /tmp/pw-venv/bin/playwright install chromium
 
-# Capture all 11 screenshots
+# Capture all 13 screenshots
 /tmp/pw-venv/bin/python docs/screenshots/capture_screens.py
 ```
+
+On Windows (PowerShell) the equivalent is `python -m venv $env:TEMP\pw-venv` etc., or use the existing backend venv if it already has playwright.
 
 Make sure the backend (port 8765) and the SPA build are both up before running. The script:
 
@@ -26,7 +28,7 @@ Make sure the backend (port 8765) and the SPA build are both up before running. 
 - Save as PNG (sharper for UI screenshots than JPEG).
 - Don't capture any real personal data — the existing test sermon is fine.
 
-## The 11 shots, in order
+## The 13 shots, in order
 
 | File | What to capture |
 |---|---|
@@ -41,6 +43,8 @@ Make sure the backend (port 8765) and the SPA build are both up before running. 
 | `09-admin-prompt.png` | The header with the password input field showing (the fallback path — only visible without Tailscale identity). |
 | `10-admin-active.png` | Sermon list view in admin mode — ADMIN MODE pill in header, red Delete buttons on every row. |
 | `11-activity.png` | The Activity (admin-only) page with the table of recent jobs. Long-running jobs show a progress bar in the Status column. |
+| `12-usage.png` | The Usage (admin-only) page with estimated-balance card at the top + per-sermon Anthropic spend table. |
+| `13-settings.png` | The Settings (admin-only) page with the YouTube channel ID + Facebook Page ID inputs and their help text. Empty fields are fine for the screenshot. |
 
 ## Swapping a single shot
 

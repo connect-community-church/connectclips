@@ -239,6 +239,54 @@ This is **permanent**. Don't delete a sermon you might want to re-clip later.
 
 ---
 
+## Activity log (admin-only)
+
+The **Activity** button in the header (visible when you're in admin mode) opens a table of every recent pipeline job — downloads, transcribes, clip selections, face prescans, and exports. Use it when a volunteer asks "I uploaded a sermon and nothing's happening" — Activity tells you whether the job is queued, mid-run, or failed.
+
+![Activity page with table of recent jobs](screenshots/11-activity.png)
+
+Each row shows:
+
+- **When** the job ran
+- **Kind** — `youtube_download`, `transcribe`, `select_clips`, `prescan_faces`, `export_clip`
+- **Sermon** it was operating on
+- **Who** triggered it (Tailscale login or "anonymous" if entered via password)
+- **Status** — running (with a live progress bar), done, or failed (with the error message in red)
+
+Long-running jobs update in place — you don't need to refresh.
+
+---
+
+## Anthropic API usage (admin-only)
+
+The **Usage** button shows the running tally of Claude API spend per sermon, plus a top-up history if you've recorded any. Mike uses this to keep an eye on the API budget — typical sermon costs ~$0.05, so the monthly tally on a once-a-week schedule should be a few dollars at most.
+
+![Usage page with per-sermon spend and top-up history](screenshots/12-usage.png)
+
+Two things volunteers don't need to touch but can ask about:
+
+- **Estimated balance** — what's left of the most recent top-up (manually recorded; the API doesn't expose a balance, so this is just our running notebook).
+- **Per-sermon table** — input/output tokens and cost for the clip-selection call on each sermon. If a number looks unusually high, the sermon was probably very long; that's the model retrieving more transcript.
+
+---
+
+## Settings (admin-only)
+
+The **Settings** button is where the publish-target accounts get configured. By default the platform buttons in the Publish panel open generic upload pages — whatever account is signed into your browser is what posts. Setting the church's YouTube channel ID and Facebook Page ID here makes those buttons deep-link straight to the right destination, so a volunteer signed into both their personal and the church account doesn't accidentally cross-post to the wrong one.
+
+![Settings page with YouTube channel ID and Facebook Page ID fields](screenshots/13-settings.png)
+
+Both fields are optional. Empty = use the generic upload page (today's behavior). Filled in = deep-link.
+
+**Where to find the IDs** — click the help links right under each input:
+
+- **YouTube channel ID**: <https://www.youtube.com/account_advanced> while signed in to the church account. Starts with `UC`, 24 characters.
+- **Facebook Page ID**: visit your Page → **About** → **Page transparency** → **Page ID**. Numeric, ~15 digits.
+
+**TikTok and Instagram stay generic** regardless — neither platform exposes a channel-specific upload URL that works in a browser session. Volunteers still need to make sure they're signed into the right TikTok / Instagram account before clicking those buttons.
+
+---
+
 ## Troubleshooting
 
 **The page doesn't load at all.**
@@ -292,6 +340,9 @@ Hard-refresh the browser (Ctrl+Shift+R). The browser may be playing a cached old
 | Get the YouTube deep-link | Trim view → Publish panel → Copy full-sermon link |
 | Open a platform's upload page | Trim view → Publish panel → colored platform button |
 | Delete an old sermon | Header → Enter admin mode → Delete on the row |
+| See what's running across all sermons | Header → **Activity** (admin-only) |
+| Check Anthropic API spend | Header → **Usage** (admin-only) |
+| Configure publish-target accounts (YT channel, FB Page) | Header → **Settings** (admin-only) |
 
 ---
 
