@@ -5,6 +5,7 @@ import { SermonDetail } from './views/SermonDetail'
 import { Trim } from './views/Trim'
 import { AdminControls } from './views/AdminControls'
 import { History } from './views/History'
+import { Settings } from './views/Settings'
 import { Usage } from './views/Usage'
 import type { Clip, Me, Sermon } from './types'
 import logo from './assets/connectclips-banner.png'
@@ -16,6 +17,7 @@ type View =
   | { name: 'trim'; sermon: Sermon; clip: Clip; clipIndex: number }
   | { name: 'history' }
   | { name: 'usage' }
+  | { name: 'settings' }
 
 // Parsed-from-URL form. Doesn't carry the full sermon/clip object — those
 // come from the API on hydration.
@@ -25,6 +27,7 @@ type Route =
   | { name: 'trim'; sermonName: string; clipIndex: number }
   | { name: 'history' }
   | { name: 'usage' }
+  | { name: 'settings' }
 
 type Upload = {
   id: string  // client-side; lets the banner key by uploads even if the file
@@ -46,11 +49,12 @@ const ANON: Me = { login: null, name: null, profile_pic: null, admin: false, ano
 // to for cross-history hydration.
 function buildPath(view: View): string {
   switch (view.name) {
-    case 'list':    return '/'
-    case 'history': return '/history'
-    case 'usage':   return '/usage'
-    case 'detail':  return `/sermons/${encodeURIComponent(view.sermon.name)}`
-    case 'trim':    return `/sermons/${encodeURIComponent(view.sermon.name)}/clip/${view.clipIndex}`
+    case 'list':     return '/'
+    case 'history':  return '/history'
+    case 'usage':    return '/usage'
+    case 'settings': return '/settings'
+    case 'detail':   return `/sermons/${encodeURIComponent(view.sermon.name)}`
+    case 'trim':     return `/sermons/${encodeURIComponent(view.sermon.name)}/clip/${view.clipIndex}`
   }
 }
 
@@ -58,6 +62,7 @@ function parsePath(pathname: string): Route {
   if (pathname === '' || pathname === '/') return { name: 'list' }
   if (pathname === '/history') return { name: 'history' }
   if (pathname === '/usage') return { name: 'usage' }
+  if (pathname === '/settings') return { name: 'settings' }
   const trim = pathname.match(/^\/sermons\/([^/]+)\/clip\/(\d+)\/?$/)
   if (trim) {
     return { name: 'trim', sermonName: decodeURIComponent(trim[1]), clipIndex: parseInt(trim[2], 10) }
@@ -76,6 +81,7 @@ function routeMatchesView(route: Route, view: View): boolean {
   if (route.name === 'list' && view.name === 'list') return true
   if (route.name === 'history' && view.name === 'history') return true
   if (route.name === 'usage' && view.name === 'usage') return true
+  if (route.name === 'settings' && view.name === 'settings') return true
   if (route.name === 'detail' && view.name === 'detail') {
     return route.sermonName === view.sermon.name
   }
@@ -114,9 +120,10 @@ function App() {
   // (for trim) clip from the API. On miss (sermon deleted, clip index out
   // of range, network error) falls back to the closest valid view.
   const hydrateRoute = useCallback(async (route: Route): Promise<View> => {
-    if (route.name === 'list')    return { name: 'list' }
-    if (route.name === 'history') return { name: 'history' }
-    if (route.name === 'usage')   return { name: 'usage' }
+    if (route.name === 'list')     return { name: 'list' }
+    if (route.name === 'history')  return { name: 'history' }
+    if (route.name === 'usage')    return { name: 'usage' }
+    if (route.name === 'settings') return { name: 'settings' }
 
     const sermons = await api.listSermons()
     const sermon = sermons.find((s) => s.name === route.sermonName)
@@ -304,6 +311,12 @@ function App() {
               Usage
             </button>
           )}
+          {/* Settings: admin-only — publish-target IDs etc. */}
+          {me.admin && view.name !== 'settings' && (
+            <button className="secondary" onClick={() => navigate({ name: 'settings' })}>
+              Settings
+            </button>
+          )}
           {/* Admin: pre-authorized via Tailscale identity, or unlock via password */}
           <AdminControls admin={me.admin} identityAdmin={!me.anonymous && me.admin} onChange={refreshMe} />
         </div>
@@ -387,6 +400,9 @@ function App() {
             )}
             {view.name === 'usage' && (
               <Usage onBack={() => navigate({ name: 'list' })} />
+            )}
+            {view.name === 'settings' && (
+              <Settings onBack={() => navigate({ name: 'list' })} />
             )}
           </>
         )}

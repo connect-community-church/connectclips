@@ -55,6 +55,7 @@ from app.config import settings
 from app.routers import auth as auth_router
 from app.routers import jobs as jobs_router
 from app.routers import me as me_router
+from app.routers import publish_targets as publish_targets_router
 from app.routers import sermons as sermons_router
 from app.routers import usage as usage_router
 from app.services import captions
@@ -127,6 +128,7 @@ app.include_router(me_router.router, prefix=_API_PREFIX)
 app.include_router(sermons_router.router, prefix=_API_PREFIX)
 app.include_router(jobs_router.router, prefix=_API_PREFIX)
 app.include_router(usage_router.router, prefix=_API_PREFIX)
+app.include_router(publish_targets_router.router, prefix=_API_PREFIX)
 
 
 @app.get(f"{_API_PREFIX}/caption-styles")

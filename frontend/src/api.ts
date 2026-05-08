@@ -104,6 +104,17 @@ export const api = {
 
   captionStyles: () => jsonFetch<{ styles: { key: string; label: string }[]; default: string }>('/caption-styles'),
 
+  // Per-deployment publish targets -- which channel/page each platform's
+  // upload deep-link should point at. GET is open (the Publish view reads
+  // it on every clip page); PUT is admin-only.
+  getPublishTargets: () =>
+    jsonFetch<{ youtube_channel_id?: string; facebook_page_id?: string }>('/publish-targets'),
+  savePublishTargets: (body: { youtube_channel_id?: string; facebook_page_id?: string }) =>
+    jsonFetch<{ youtube_channel_id?: string; facebook_page_id?: string }>(
+      '/publish-targets',
+      { method: 'PUT', body: JSON.stringify(body) },
+    ),
+
   uploadStart: (filename: string) =>
     jsonFetch<Job>('/jobs/upload-start', { method: 'POST', body: JSON.stringify({ filename }) }),
   uploadFinish: (job_id: string, error?: string) =>

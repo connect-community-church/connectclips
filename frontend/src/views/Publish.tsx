@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { fileUrl } from '../api'
+import { useEffect, useState } from 'react'
+import { api, fileUrl } from '../api'
 import type { Clip, Sermon } from '../types'
 
 type Props = {
@@ -21,19 +21,49 @@ function formatSermonDeepLink(sermon: Sermon, clip: Clip): string | null {
   return `https://youtu.be/${ytId}?t=${Math.floor(clip.start)}`
 }
 
-const PLATFORMS: { key: string; label: string; upload: string; bg: string }[] = [
-  // YouTube Studio's upload flow lives in /channel/.../videos but requires a channel id;
-  // /upload routes through the same flow without one.
-  { key: 'youtube', label: 'YouTube', upload: 'https://studio.youtube.com/', bg: '#ff0000' },
-  { key: 'tiktok', label: 'TikTok', upload: 'https://www.tiktok.com/upload', bg: '#000000' },
-  { key: 'facebook', label: 'Facebook', upload: 'https://www.facebook.com/reel/create', bg: '#1877f2' },
-  // Instagram's web Reels upload is gated; this is the canonical link, but mobile is the practical path.
-  { key: 'instagram', label: 'Instagram', upload: 'https://www.instagram.com/reels/upload/', bg: '#e1306c' },
-]
+// Build the platform list. When the admin has set a YouTube channel ID or
+// Facebook Page ID via the Settings view, the corresponding platform deep-
+// links to that specific channel / Page so the upload lands in the right
+// place even if the volunteer is signed into multiple accounts. When unset,
+// we fall back to today's generic upload pages -- post lands wherever the
+// volunteer is signed in.
+function buildPlatforms(t: { youtube_channel_id?: string; facebook_page_id?: string }) {
+  const yt = t.youtube_channel_id?.trim()
+  const fb = t.facebook_page_id?.trim()
+  return [
+    {
+      key: 'youtube', label: 'YouTube', bg: '#ff0000',
+      upload: yt
+        ? `https://studio.youtube.com/channel/${encodeURIComponent(yt)}/videos/upload`
+        : 'https://studio.youtube.com/',
+    },
+    { key: 'tiktok', label: 'TikTok', upload: 'https://www.tiktok.com/upload', bg: '#000000' },
+    {
+      key: 'facebook', label: 'Facebook', bg: '#1877f2',
+      // Meta Business Suite Reels-create takes asset_id=<page-id>; without a
+      // Page set we fall back to the generic personal Reels create page.
+      upload: fb
+        ? `https://business.facebook.com/latest/reels/create?asset_id=${encodeURIComponent(fb)}`
+        : 'https://www.facebook.com/reel/create',
+    },
+    // Instagram's web Reels upload is gated; this is the canonical link, but mobile is the practical path.
+    { key: 'instagram', label: 'Instagram', upload: 'https://www.instagram.com/reels/upload/', bg: '#e1306c' },
+  ]
+}
 
 export function Publish({ sermon, clip, exportedFilename }: Props) {
   const [copied, setCopied] = useState<string | null>(null)
+  const [platforms, setPlatforms] = useState(() => buildPlatforms({}))
   const deepLink = formatSermonDeepLink(sermon, clip)
+
+  // Fetch publish targets once; rebuild the platform link list when they
+  // arrive. If the fetch fails we keep the generic-link fallback we
+  // initialized with -- a missing settings file is the same as "no overrides".
+  useEffect(() => {
+    api.getPublishTargets()
+      .then((t) => setPlatforms(buildPlatforms(t)))
+      .catch(() => { /* keep generic fallback */ })
+  }, [])
 
   const copy = async (label: string, text: string) => {
     try {
@@ -87,7 +117,7 @@ export function Publish({ sermon, clip, exportedFilename }: Props) {
       </div>
 
       <div className="platform-buttons">
-        {PLATFORMS.map((p) => (
+        {platforms.map((p) => (
           <a
             key={p.key}
             href={p.upload}
