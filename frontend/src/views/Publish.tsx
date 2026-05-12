@@ -9,16 +9,15 @@ type Props = {
 }
 
 // yt-dlp names files <title>-<videoid>.<ext>; the video id is 11 chars of [A-Za-z0-9_-]
-function extractYoutubeId(sourceName: string): string | null {
+function extractYoutubeIdFromFilename(sourceName: string): string | null {
   const m = sourceName.match(/-([A-Za-z0-9_-]{11})\.[^.]+$/)
   return m ? m[1] : null
 }
 
-function formatSermonDeepLink(sermon: Sermon, clip: Clip): string | null {
-  const ytId = extractYoutubeId(sermon.name)
-  if (!ytId) return null
+function buildDeepLink(videoId: string | null, clip: Clip): string | null {
+  if (!videoId) return null
   // youtu.be is shorter & cleaner; t param accepts seconds (as int)
-  return `https://youtu.be/${ytId}?t=${Math.floor(clip.start)}`
+  return `https://youtu.be/${videoId}?t=${Math.floor(clip.start)}`
 }
 
 // Build the platform list. When the admin has set a YouTube channel ID or
@@ -54,7 +53,12 @@ function buildPlatforms(t: { youtube_channel_id?: string; facebook_page_id?: str
 export function Publish({ sermon, clip, exportedFilename }: Props) {
   const [copied, setCopied] = useState<string | null>(null)
   const [platforms, setPlatforms] = useState(() => buildPlatforms({}))
-  const deepLink = formatSermonDeepLink(sermon, clip)
+  // The admin-configured per-sermon URL wins when set; otherwise we fall
+  // back to extracting an id from yt-dlp's filename pattern so existing
+  // YouTube-ingested sermons keep working without any admin step.
+  const [explicitVideoId, setExplicitVideoId] = useState<string | null>(null)
+  const videoId = explicitVideoId ?? extractYoutubeIdFromFilename(sermon.name)
+  const deepLink = buildDeepLink(videoId, clip)
 
   // Fetch publish targets once; rebuild the platform link list when they
   // arrive. If the fetch fails we keep the generic-link fallback we
@@ -64,6 +68,16 @@ export function Publish({ sermon, clip, exportedFilename }: Props) {
       .then((t) => setPlatforms(buildPlatforms(t)))
       .catch(() => { /* keep generic fallback */ })
   }, [])
+
+  // Per-sermon program-video URL. Loaded once on mount; this drives the
+  // deep link when set, taking precedence over the filename-based fallback.
+  useEffect(() => {
+    let cancelled = false
+    api.getSermonMeta(sermon.name)
+      .then((m) => { if (!cancelled) setExplicitVideoId(m.program_video_id) })
+      .catch(() => { /* leave fallback */ })
+    return () => { cancelled = true }
+  }, [sermon.name])
 
   const copy = async (label: string, text: string) => {
     try {

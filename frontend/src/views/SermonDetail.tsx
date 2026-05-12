@@ -74,6 +74,13 @@ export function SermonDetail({ sermon, admin, onBack, onTrim, onDeleted }: Props
   const [deleting, setDeleting] = useState(false)
   const [minClips, setMinClips] = useState(3)
   const [maxClips, setMaxClips] = useState(8)
+  // Full-sermon YouTube URL drives the "watch from this moment" deep link in
+  // the Publish view. Stored as a sidecar per sermon; admin edits it once
+  // per sermon and volunteers consume the resulting deep link.
+  const [programUrl, setProgramUrl] = useState<string>('')
+  const [programVideoId, setProgramVideoId] = useState<string | null>(null)
+  const [urlError, setUrlError] = useState<string | null>(null)
+  const [urlSaving, setUrlSaving] = useState(false)
 
   const refreshClips = useCallback(() => {
     if (!sermon.clips_selected) {
@@ -86,6 +93,34 @@ export function SermonDetail({ sermon, admin, onBack, onTrim, onDeleted }: Props
   useEffect(() => {
     refreshClips()
   }, [refreshClips])
+
+  // Load the per-sermon meta once. The URL is read here for both admin
+  // (to populate the edit field) and non-admin (so we can display the
+  // current setting read-only or hide it if unset).
+  useEffect(() => {
+    let cancelled = false
+    api.getSermonMeta(sermon.name).then((m) => {
+      if (cancelled) return
+      setProgramUrl(m.program_video_url ?? '')
+      setProgramVideoId(m.program_video_id ?? null)
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [sermon.name])
+
+  const saveProgramUrl = async (raw: string) => {
+    const trimmed = raw.trim()
+    setUrlError(null)
+    setUrlSaving(true)
+    try {
+      const m = await api.saveSermonMeta(sermon.name, { program_video_url: trimmed || null })
+      setProgramUrl(m.program_video_url ?? '')
+      setProgramVideoId(m.program_video_id ?? null)
+    } catch (err) {
+      setUrlError(String(err))
+    } finally {
+      setUrlSaving(false)
+    }
+  }
 
   // Poll relevant jobs every 2s while any are active for this sermon
   useEffect(() => {
@@ -149,6 +184,43 @@ export function SermonDetail({ sermon, admin, onBack, onTrim, onDeleted }: Props
       <h1 title={sermon.name}>{sermon.name}</h1>
 
       {error && <div className="error">Error: {error}</div>}
+
+      {(admin || programVideoId) && (
+        <section className="program-url-row">
+          <label className="muted small" htmlFor="program-url-input">Full sermon YouTube URL</label>
+          {admin ? (
+            <>
+              <input
+                id="program-url-input"
+                type="url"
+                className="program-url-input"
+                placeholder="https://youtu.be/… (used for clip deep-links)"
+                value={programUrl}
+                disabled={urlSaving}
+                onChange={(e) => setProgramUrl(e.target.value)}
+                onBlur={(e) => saveProgramUrl(e.target.value)}
+              />
+              {programVideoId && (
+                <span className="badge ok" title="Parsed YouTube video ID — deep links will work">
+                  ✓ {programVideoId}
+                </span>
+              )}
+              {urlError && <span className="error-inline">{urlError}</span>}
+            </>
+          ) : (
+            programVideoId && (
+              <a
+                href={`https://youtu.be/${programVideoId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="muted small"
+              >
+                youtu.be/{programVideoId}
+              </a>
+            )
+          )}
+        </section>
+      )}
 
       <section className="pipeline">
         <div className="step">

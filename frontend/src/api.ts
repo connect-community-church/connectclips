@@ -115,6 +115,20 @@ export const api = {
       { method: 'PUT', body: JSON.stringify(body) },
     ),
 
+  // Per-sermon metadata -- currently just the full-sermon YouTube URL that
+  // each clip's "watch from this moment" deep link points at. GET is open;
+  // PUT is admin-only. Backend validates that the URL parses to a YouTube
+  // video ID and returns it as program_video_id for the frontend to use.
+  getSermonMeta: (name: string) =>
+    jsonFetch<{ program_video_url: string | null; program_video_id: string | null }>(
+      `/sermons/${encodeURIComponent(name)}/meta`,
+    ),
+  saveSermonMeta: (name: string, body: { program_video_url: string | null }) =>
+    jsonFetch<{ program_video_url: string | null; program_video_id: string | null }>(
+      `/sermons/${encodeURIComponent(name)}/meta`,
+      { method: 'PUT', body: JSON.stringify(body) },
+    ),
+
   uploadStart: (filename: string) =>
     jsonFetch<Job>('/jobs/upload-start', { method: 'POST', body: JSON.stringify({ filename }) }),
   uploadFinish: (job_id: string, error?: string) =>

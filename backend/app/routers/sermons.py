@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.identity import get_user
 from app.routers.auth import require_admin
-from app.services import captions, clip_overrides, clip_selection, ingest, jobs, reframe
+from app.services import captions, clip_overrides, clip_selection, ingest, jobs, reframe, sermon_meta
 from app.services.transcribe import transcript_path_for
 
 
@@ -238,6 +238,60 @@ def delete_clip_overrides(name: str, clip_index: int) -> dict:
     """Reset this clip back to Claude's suggestion (no overrides)."""
     clip_overrides.delete_override(name, clip_index)
     return {"deleted": True}
+
+
+class SermonMetaIn(BaseModel):
+    """Per-sermon admin-editable fields. Mirrors ``sermon_meta.FIELDS``.
+
+    A field set to ``null`` or empty string means "clear this field".
+    """
+    program_video_url: str | None = None
+
+
+def _meta_response(name: str) -> dict:
+    """Shape returned by both GET and PUT /meta -- stored fields plus the
+    derived YouTube video_id (null if unset or unparseable). The frontend
+    builds the deep link itself once it has the video_id."""
+    data = sermon_meta.load(name)
+    url = data.get("program_video_url")
+    return {
+        "program_video_url": url,
+        "program_video_id": sermon_meta.extract_youtube_id(url),
+    }
+
+
+@router.get("/{name}/meta")
+def get_sermon_meta(name: str) -> dict:
+    """Per-sermon metadata (currently program_video_url). Open -- the
+    Publish view reads it on every clip page to render the deep link."""
+    src = settings.data_sources_dir / name
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail=f"sermon not found: {name}")
+    return _meta_response(name)
+
+
+@router.put("/{name}/meta", dependencies=[Depends(require_admin)])
+def put_sermon_meta(name: str, body: SermonMetaIn) -> dict:
+    """Upsert sermon metadata. Admin-only -- this is an ops decision (which
+    YouTube upload represents the full sermon), not a per-volunteer choice.
+
+    A non-empty ``program_video_url`` must parse to a recognisable YouTube
+    video ID. Empty / null clears the field.
+    """
+    src = settings.data_sources_dir / name
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail=f"sermon not found: {name}")
+    values = body.model_dump()
+    url = values.get("program_video_url")
+    if url is not None and str(url).strip() != "":
+        if sermon_meta.extract_youtube_id(url) is None:
+            raise HTTPException(
+                status_code=400,
+                detail="program_video_url must be a YouTube link "
+                       "(youtu.be/<id> or youtube.com/watch?v=<id>).",
+            )
+    sermon_meta.save(name, values)
+    return _meta_response(name)
 
 
 @router.post("/upload", status_code=201)

@@ -161,6 +161,26 @@ button.danger:hover { background: rgba(248,81,73,0.28); }
 .header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 8px; }
 .row-actions { margin-top: 8px; }
 
+.program-url-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+.program-url-row label { white-space: nowrap; }
+.program-url-input {
+  flex: 1 1 320px;
+  min-width: 0;
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 14px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
 main { padding-top: 8px; }
 
 h1 { font-size: 22px; margin: 0 0 16px; word-break: break-all; }
