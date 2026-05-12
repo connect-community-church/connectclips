@@ -57,12 +57,15 @@ export const api = {
     include_hook_title?: boolean,
     caption_margin_v?: number | null,
     identity_id?: number | null,
+    zoom_level?: string | null,
+    lock_camera?: boolean,
   ) =>
     jsonFetch<Job>('/jobs/export-clip', {
       method: 'POST',
       body: JSON.stringify({
         source, clip_index, start_override, end_override, caption_style,
-        include_hook_title, caption_margin_v, identity_id,
+        include_hook_title, caption_margin_v, identity_id, zoom_level,
+        lock_camera,
       }),
     }),
 
@@ -82,10 +85,17 @@ export const api = {
   // Preview-pane support — see backend/app/services/reframe.track_for_clip.
   // After the source-level prescan lands during ingest, this is a near-instant
   // slice. The first call on a pre-prescan source falls back to a full scan.
-  getClipTrack: (source: string, start: number, end: number, identity_id?: number | null) => {
+  getClipTrack: (
+    source: string, start: number, end: number,
+    identity_id?: number | null,
+    zoom_level?: string | null,
+    lock_camera?: boolean,
+  ) => {
     const id = identity_id == null ? '' : `&identity_id=${identity_id}`
+    const zl = zoom_level == null ? '' : `&zoom_level=${encodeURIComponent(zoom_level)}`
+    const lc = lock_camera ? '&lock_camera=true' : ''
     return jsonFetch<Track>(
-      `/sermons/${encodeURIComponent(source)}/clip-track?start=${start}&end=${end}${id}`,
+      `/sermons/${encodeURIComponent(source)}/clip-track?start=${start}&end=${end}${id}${zl}${lc}`,
     )
   },
 

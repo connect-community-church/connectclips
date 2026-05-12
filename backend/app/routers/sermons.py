@@ -67,7 +67,10 @@ def list_sermons() -> list[dict]:
 
 @router.get("/{name}/clip-track")
 def get_clip_track(
-    name: str, start: float, end: float, identity_id: int | None = None,
+    name: str, start: float, end: float,
+    identity_id: int | None = None,
+    zoom_level: str | None = None,
+    lock_camera: bool = False,
 ) -> dict:
     """Return the per-frame crop track for the given range over this sermon.
 
@@ -79,13 +82,19 @@ def get_clip_track(
     ``source_scan.json`` and returns ~instantly. If the source hasn't been
     prescanned yet (e.g. uploaded before the prescan job existed), the call
     triggers a synchronous full-source scan as a fallback — slow but only
-    happens once per source."""
+    happens once per source.
+
+    ``zoom_level`` ("tight" / "medium" / "wide") drives the face→crop-height
+    multiplier so the preview reflects what the export will produce."""
     src = settings.data_sources_dir / name
     if not src.is_file():
         raise HTTPException(status_code=404, detail=f"sermon not found: {name}")
     if end <= start:
         raise HTTPException(status_code=400, detail="end must be greater than start")
-    return reframe.track_for_clip(src, start, end, identity_id=identity_id)
+    return reframe.track_for_clip(
+        src, start, end, identity_id=identity_id, zoom_level=zoom_level,
+        lock_camera=lock_camera,
+    )
 
 
 @router.get("/{name}/identities")
@@ -212,6 +221,8 @@ class ClipOverridesIn(BaseModel):
     caption_margin_v: int | None = None
     include_hook_title: bool | None = None
     identity_id: int | None = None
+    zoom_level: str | None = None
+    lock_camera: bool | None = None
 
 
 @router.put("/{name}/clips/{clip_index}/overrides")

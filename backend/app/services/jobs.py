@@ -250,6 +250,8 @@ def create_export_clip_job(
     caption_margin_v: int | None = None,
     include_hook_title: bool = True,
     identity_id: int | None = None,
+    zoom_level: str | None = None,
+    lock_camera: bool = False,
     user_login: str | None = None,
     user_name: str | None = None,
 ) -> Job:
@@ -291,6 +293,8 @@ def create_export_clip_job(
         hook_title,
         caption_margin_v,
         identity_id,
+        zoom_level,
+        lock_camera,
     ))
     return job
 
@@ -508,6 +512,8 @@ async def _run_export_clip(
     hook_title: str | None = None,
     caption_margin_v: int | None = None,
     identity_id: int | None = None,
+    zoom_level: str | None = None,
+    lock_camera: bool = False,
 ) -> None:
     await _start(job)
 
@@ -530,6 +536,7 @@ async def _run_export_clip(
         result = await asyncio.to_thread(
             reframe.export_clip, src, job.start, job.end, output_name, transcript_path,
             progress_cb, caption_style, hook_title, caption_margin_v, identity_id,
+            zoom_level, lock_camera,
         )
         job.output_clip_path = result["output"]
         job.progress_percent = 1.0

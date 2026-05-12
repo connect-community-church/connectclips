@@ -13,6 +13,8 @@ type Props = {
   includeHookTitle: boolean
   hookTitle: string
   identityId: number | null
+  zoomLevel?: string | null
+  lockCamera?: boolean
 }
 
 // Pane rendering size — keep it cheap to draw and easy to lay out next to the
@@ -116,7 +118,7 @@ function hookLines(title: string): { lines: string[]; fontSize: number } {
 export function LivePreview({
   sermon, clipStart, clipEnd, sourceVideoRef,
   captionStyleKey, captionMarginV, onCaptionMarginVChange,
-  includeHookTitle, hookTitle, identityId,
+  includeHookTitle, hookTitle, identityId, zoomLevel, lockCamera,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const trackRef = useRef<Track | null>(null)
@@ -126,21 +128,30 @@ export function LivePreview({
   const [words, setWords] = useState<TranscriptWord[]>([])
   const [clipTime, setClipTime] = useState(0)  // seconds since clipStart, drives caption + hook visibility
 
+  const stageMode = zoomLevel === 'stage'
+
   // Fetch track. With the source-level prescan in place this is a near-instant
   // slice. The first call after a fresh upload (before prescan completes) falls
   // back to a full source scan and can take a few minutes.
+  // Stage mode skips the track fetch entirely — the canvas renders the
+  // blurred-cover + foreground composite client-side from just the source
+  // video element. No per-frame face crop is involved.
   useEffect(() => {
     let cancelled = false
     setTrack(null)
     trackRef.current = null
     setTrackError(null)
+    if (stageMode) {
+      setTrackLoading(false)
+      return () => { cancelled = true }
+    }
     setTrackLoading(true)
-    api.getClipTrack(sermon, clipStart, clipEnd, identityId)
+    api.getClipTrack(sermon, clipStart, clipEnd, identityId, zoomLevel, lockCamera)
       .then((t) => { if (!cancelled) { setTrack(t); trackRef.current = t } })
       .catch((e) => { if (!cancelled) setTrackError(String(e)) })
       .finally(() => { if (!cancelled) setTrackLoading(false) })
     return () => { cancelled = true }
-  }, [sermon, clipStart, clipEnd, identityId])
+  }, [sermon, clipStart, clipEnd, identityId, zoomLevel, stageMode, lockCamera])
 
   // Fetch words for caption rendering. Cheap — just a JSON slice.
   useEffect(() => {
@@ -158,10 +169,42 @@ export function LivePreview({
   const drawFrame = useCallback(() => {
     const v = sourceVideoRef.current
     const canvas = canvasRef.current
-    const t = trackRef.current
-    if (!v || !canvas || !t) return
+    if (!v || !canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+
+    // Stage mode renders entirely from the source video (no backend track).
+    // Two passes: a heavily-blurred cover-scaled background, then the source
+    // letterboxed into the middle scaled-to-width. Mirrors the ffmpeg
+    // filtergraph used at export time so what volunteers see ≈ what ships.
+    if (stageMode) {
+      const srcW = v.videoWidth || 16
+      const srcH = v.videoHeight || 9
+      const cw = canvas.width
+      const ch = canvas.height
+      // 1. Cover-scale the source to fill the canvas (and beyond), blur it.
+      const coverScale = Math.max(cw / srcW, ch / srcH)
+      const dw = srcW * coverScale
+      const dh = srcH * coverScale
+      const dx = (cw - dw) / 2
+      const dy = (ch - dh) / 2
+      try {
+        ctx.filter = 'blur(20px)'
+        ctx.drawImage(v, 0, 0, srcW, srcH, dx, dy, dw, dh)
+        ctx.filter = 'none'
+        // 2. Foreground: scale-to-width, centered vertically.
+        const fgScale = cw / srcW
+        const fgH = srcH * fgScale
+        const fgY = (ch - fgH) / 2
+        ctx.drawImage(v, 0, 0, srcW, srcH, 0, fgY, cw, fgH)
+      } catch {
+        // drawImage throws if the video isn't ready; ignore until next frame
+      }
+      return
+    }
+
+    const t = trackRef.current
+    if (!t) return
 
     // Map source time → frame index in the track
     const dt = v.currentTime - clipStart
@@ -177,7 +220,7 @@ export function LivePreview({
     } catch {
       // drawImage throws if the video isn't ready; ignore until next frame
     }
-  }, [sourceVideoRef, clipStart])
+  }, [sourceVideoRef, clipStart, stageMode])
 
   useEffect(() => {
     const v = sourceVideoRef.current

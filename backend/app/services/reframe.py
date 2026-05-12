@@ -98,14 +98,57 @@ MIN_CONFIDENCE = 0.6  # YuNet — well-calibrated; 0.6 rejects most false positi
 
 YUNET_MODEL = os.path.expanduser("~/.cache/connectclips/face_detection_yunet_2023mar.onnx")
 
-# Crop sizing
-FACE_TO_CROP_H = 3.6  # crop height ≈ 3.6× face height; pastor sits at ~28% face/crop
+# Crop sizing — multiplier from face height to crop height. Higher = wider
+# framing (more pastor + background visible). Volunteer-selectable per clip
+# via ClipUserEdits.zoom_level; falls back to DEFAULT_ZOOM_LEVEL when unset.
+# Volunteer feedback at the 2026-05-09 meeting: the original "tight" framing
+# read as a mugshot and amplified face-tracking jitter; "medium" gives more
+# breathing room and feels closer to other churches' shorts.
+ZOOM_PRESETS: dict[str, float] = {
+    "tight":  3.6,
+    "medium": 5.0,
+    "wide":   7.0,
+}
+DEFAULT_ZOOM_LEVEL = "medium"
+FACE_TO_CROP_H = ZOOM_PRESETS[DEFAULT_ZOOM_LEVEL]  # default multiplier
 HEADROOM_FRAC = 0.10  # nudge crop up so face is above geometric center
 MIN_CROP_H_FRAC = 0.30  # don't zoom in tighter than 30% of source height
 MAX_CROP_H_FRAC = 1.00  # ...or wider than the full source height
 
-# Smoothing
-EMA_ALPHA = 0.20
+
+def resolve_zoom(level: str | None) -> float:
+    """Map a UI zoom preset name to the face→crop multiplier. Unknown or
+    missing names fall back to the medium default — guards against a stale
+    frontend writing a preset name the backend doesn't know about yet."""
+    if level and level in ZOOM_PRESETS:
+        return ZOOM_PRESETS[level]
+    return ZOOM_PRESETS[DEFAULT_ZOOM_LEVEL]
+
+# Smoothing — the EMA alpha and deadband together produce a "PTZ-smooth" feel:
+# detector jitter (a few pixels frame-to-frame) is absorbed by the deadband,
+# real movement (pastor walking) is followed but slowly. The original 0.20
+# tracked too fast and read as a wobbly handheld camera on the clean feed
+# where pastor position is otherwise rock steady.
+EMA_ALPHA = 0.05
+# Deadband threshold: face must move at least this many pixels OR this fraction
+# of its own height before the crop starts panning. Whichever is larger wins,
+# so a small distant face has its own scaled deadband while a large near face
+# uses the absolute floor.
+DEADBAND_PX_MIN = 20.0
+DEADBAND_FACE_FRAC = 0.15
+# Crop-height deadband: face height must change by at least this fraction of
+# the current crop height before we update zoom. Detector face_h drifts by
+# 1-3% per frame even on a still face; without this, that jitter scales
+# straight into visible zoom wobble (face_h * 5.0 multiplier = ±10-30px of
+# crop motion per frame on Medium). 10% is the threshold for "real pose
+# change worth tracking" vs "detector noise we should ignore" — anything
+# below that and the crop stays put.
+DEADBAND_H_FRAC = 0.10
+# Once the height deadband fires we still ease toward target instead of
+# snapping, but with a slower alpha than position. Snapping would be visible
+# as a single-frame step; this slower glide takes ~3-4s to fully catch up,
+# which reads as natural "the camera adjusted" rather than "the crop jumped".
+EMA_ALPHA_H = 0.02
 
 # Scene cut detection (run on every frame)
 CUT_DOWNSCALE_W = 64  # tiny grayscale thumb for diffing
@@ -523,10 +566,17 @@ def track_for_clip(
     start: float,
     end: float,
     identity_id: int | None = None,
+    zoom_level: str | None = None,
+    lock_camera: bool = False,
 ) -> dict:
     """Return the per-frame crop track for the preview UI. Cheap when the
     source scan exists (just a slice). The first call after a fresh source
-    upload triggers ``scan_source`` synchronously."""
+    upload triggers ``scan_source`` synchronously.
+
+    ``zoom_level`` is a preset name from ``ZOOM_PRESETS`` ("tight"/"medium"/
+    "wide"); unknown / unset falls back to the default. ``lock_camera``
+    bypasses tracking entirely and emits a constant crop at the median
+    face position."""
     scan = scan_for_clip(source_path, start, end, identity_id=identity_id)
     per_frame_faces = _expand_to_per_frame(
         scan["n_frames"], scan["faces"], scan.get("sample_offset_frames", 0),
@@ -534,6 +584,8 @@ def track_for_clip(
     track = _segment_crop_track(
         scan["n_frames"], scan["src_w"], scan["src_h"],
         per_frame_faces, scan["cuts"],
+        face_to_crop_h=resolve_zoom(zoom_level),
+        lock_camera=lock_camera,
     )
     return {
         "n_frames": int(scan["n_frames"]),
@@ -662,15 +714,29 @@ def _segment_crop_track(
     src_h: int,
     faces_per_frame: list[dict | None],
     cuts: list[int],
+    face_to_crop_h: float = FACE_TO_CROP_H,
+    lock_camera: bool = False,
 ) -> np.ndarray:
     """Build per-frame (cx, cy, crop_h) array using cut-bounded smoothing.
 
     Within each cut-bounded segment, follow the face (forward-filling
-    detection gaps) and EMA smooth. At each cut, snap to the new face
+    detection gaps) with a deadband + slow-EMA that absorbs detector jitter
+    while still following real movement. At each cut, snap to the new face
     position. No smoothing crosses a cut.
+
+    ``face_to_crop_h`` is the multiplier from face height to crop height
+    (3.6 = tight, 5.0 = medium, 7.0 = wide). Higher values produce wider
+    framing with less perceived jitter.
+
+    ``lock_camera``: when True, ignore per-frame face positions and emit a
+    single static crop at the median face position over the whole clip.
+    Trades "follows the pastor" for "absolute zero motion." Useful on a
+    fixed PTZ camera with a stationary pastor.
 
     Returns shape (n_frames, 3).
     """
+    if lock_camera:
+        return _locked_crop_track(n_frames, src_w, src_h, faces_per_frame, face_to_crop_h)
     track = np.zeros((n_frames, 3), dtype=np.float32)
     cut_bounds = list(cuts) + [n_frames]
     last_state: tuple[float, float, float] | None = None
@@ -679,7 +745,7 @@ def _segment_crop_track(
 
     def _state_from_face(f: dict) -> tuple[float, float, float]:
         h = float(np.clip(
-            f["h"] * FACE_TO_CROP_H,
+            f["h"] * face_to_crop_h,
             src_h * MIN_CROP_H_FRAC,
             src_h * MAX_CROP_H_FRAC,
         ))
@@ -704,7 +770,7 @@ def _segment_crop_track(
 
         first = seg_faces[first_det_idx]
         snap_h = float(np.clip(
-            first["h"] * FACE_TO_CROP_H,
+            first["h"] * face_to_crop_h,
             src_h * MIN_CROP_H_FRAC,
             src_h * MAX_CROP_H_FRAC,
         ))
@@ -718,7 +784,7 @@ def _segment_crop_track(
             if face is not None:
                 last_face = face
             target_h = float(np.clip(
-                last_face["h"] * FACE_TO_CROP_H,
+                last_face["h"] * face_to_crop_h,
                 src_h * MIN_CROP_H_FRAC,
                 src_h * MAX_CROP_H_FRAC,
             ))
@@ -729,16 +795,69 @@ def _segment_crop_track(
                 track[seg_start] = prev
             else:
                 px, py, ph = prev
-                track[seg_start + i] = (
-                    EMA_ALPHA * target_cx + (1 - EMA_ALPHA) * px,
-                    EMA_ALPHA * target_cy + (1 - EMA_ALPHA) * py,
-                    EMA_ALPHA * target_h + (1 - EMA_ALPHA) * ph,
-                )
+                # Position and crop-height each have an independent deadband.
+                # Position deadband scales with face size so a small distant
+                # face has a proportionally tight threshold while a large near
+                # face uses the absolute floor.  Height deadband is a fraction
+                # of the CURRENT crop height — anchored on what's on screen,
+                # not what the detector just reported, so the threshold stays
+                # stable across the segment.
+                pos_threshold = max(DEADBAND_PX_MIN, last_face["h"] * DEADBAND_FACE_FRAC)
+                dx = target_cx - px
+                dy = target_cy - py
+                pos_moves = abs(dx) >= pos_threshold or abs(dy) >= pos_threshold
+
+                h_change = abs(target_h - ph)
+                h_moves = h_change >= ph * DEADBAND_H_FRAC
+
+                new_cx = (EMA_ALPHA * target_cx + (1 - EMA_ALPHA) * px) if pos_moves else px
+                new_cy = (EMA_ALPHA * target_cy + (1 - EMA_ALPHA) * py) if pos_moves else py
+                new_h  = (EMA_ALPHA_H * target_h + (1 - EMA_ALPHA_H) * ph) if h_moves else ph
+                track[seg_start + i] = (new_cx, new_cy, new_h)
             prev = tuple(track[seg_start + i])
 
         last_state = prev
 
     return track
+
+
+def _locked_crop_track(
+    n_frames: int,
+    src_w: int,
+    src_h: int,
+    faces_per_frame: list[dict | None],
+    face_to_crop_h: float,
+) -> np.ndarray:
+    """Lock Camera mode: emit one fixed (cx, cy, crop_h) tile across every
+    frame. Position is the median of all detected face centres across the
+    clip — median rather than mean so a few off-frame stray detections
+    can't pull the static crop off the pastor.
+
+    If no faces were ever detected, fall back to a centred max-height crop
+    (same fallback as the smoothing path's all-empty segments)."""
+    valid = [f for f in faces_per_frame if f is not None]
+    if not valid:
+        cx = float(src_w) / 2.0
+        cy_anchor = float(src_h) / 2.0
+        crop_h = float(src_h) * MAX_CROP_H_FRAC
+    else:
+        cxs = np.array([f["cx"] for f in valid], dtype=np.float32)
+        cys = np.array([f["cy"] for f in valid], dtype=np.float32)
+        hs  = np.array([f["h"]  for f in valid], dtype=np.float32)
+        med_cx = float(np.median(cxs))
+        med_cy = float(np.median(cys))
+        med_h  = float(np.median(hs))
+        crop_h = float(np.clip(
+            med_h * face_to_crop_h,
+            src_h * MIN_CROP_H_FRAC,
+            src_h * MAX_CROP_H_FRAC,
+        ))
+        cx = med_cx
+        cy_anchor = med_cy - HEADROOM_FRAC * crop_h
+    return np.tile(
+        np.array([cx, cy_anchor, crop_h], dtype=np.float32),
+        (n_frames, 1),
+    )
 
 
 def _crop_window(
@@ -834,6 +953,85 @@ def _encode(
         )
 
 
+def _encode_stage(
+    clip_path: Path,
+    out_path: Path,
+    ass_path: Path | None = None,
+    progress_cb: ProgressCB | None = None,
+    total_frames: int = 0,
+    duration_seconds: float = 0.0,
+) -> None:
+    """Stage mode encode: full source frame letterboxed onto a blurred copy
+    of itself. No face tracking — the whole frame is shown so the pastor
+    can't drift out of crop, and the blur fill makes the empty top/bottom
+    look polished instead of black-bar dead space.
+
+    Single ffmpeg pass on the already-extracted clip (no Python decode
+    loop). Progress is parsed from ``-progress pipe:1`` stdout so the export
+    UI still gets a moving bar.
+    """
+    bg_chain = (
+        "scale=1080:1920:force_original_aspect_ratio=increase,"
+        "crop=1080:1920,gblur=sigma=24"
+    )
+    # -2 keeps height even (h264 requires even dims); width = OUT_W.
+    fg_chain = f"scale={OUT_W}:-2"
+    parts = [
+        "[0:v]split=2[bg_in][fg_in]",
+        f"[bg_in]{bg_chain}[bg]",
+        f"[fg_in]{fg_chain}[fg]",
+        "[bg][fg]overlay=(W-w)/2:(H-h)/2[composite]",
+    ]
+    final_label = "[composite]"
+    if ass_path is not None:
+        # Same colon-escape trick as _encode: forward-slash path, escape the
+        # drive-letter colon if present, single-quote the whole filename.
+        ff_path = str(ass_path).replace("\\", "/").replace(":", "\\:")
+        parts.append(f"[composite]subtitles='{ff_path}'[v]")
+        final_label = "[v]"
+    filtergraph = ";".join(parts)
+
+    cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "-i", str(clip_path),
+        "-filter_complex", filtergraph,
+        "-map", final_label, "-map", "0:a:0?",
+        *plat.encoder_args(plat.H264_ENCODER, fast=False, bitrate_video="6M"),
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "128k",
+        "-shortest",
+        "-movflags", "+faststart",
+        "-progress", "pipe:1",
+        str(out_path),
+    ]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    total_us = max(1, int(duration_seconds * 1_000_000))
+    stderr_bytes = b""
+    try:
+        if proc.stdout is not None:
+            for raw in iter(proc.stdout.readline, b""):
+                line = raw.decode("utf-8", errors="replace").strip()
+                if line.startswith("out_time_us=") and progress_cb is not None:
+                    try:
+                        cur_us = int(line.split("=", 1)[1])
+                        fraction = min(1.0, max(0.0, cur_us / total_us))
+                        _emit(
+                            progress_cb, "encode",
+                            int(round(fraction * total_frames)), total_frames,
+                        )
+                    except ValueError:
+                        pass
+                if line == "progress=end":
+                    break
+        stderr_bytes = proc.stderr.read() if proc.stderr else b""
+    finally:
+        proc.wait()
+    if proc.returncode != 0:
+        tail = stderr_bytes.decode("utf-8", errors="replace").strip().splitlines()[-12:]
+        msg = "\n  ".join(tail) if tail else "(no stderr captured)"
+        raise RuntimeError(f"ffmpeg stage encode failed (rc={proc.returncode}):\n  {msg}")
+
+
 def export_clip(
     source_path: Path,
     start: float,
@@ -845,30 +1043,20 @@ def export_clip(
     hook_title: str | None = None,
     caption_margin_v: int | None = None,
     identity_id: int | None = None,
+    zoom_level: str | None = None,
+    lock_camera: bool = False,
 ) -> dict:
     out_path = settings.data_clips_dir / output_name
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    stage_mode = (zoom_level == "stage")
 
     with tempfile.TemporaryDirectory() as tmp:
         _emit(progress_cb, "extract", 0, 0)
         temp_clip = Path(tmp) / "clip.mp4"
         _ffmpeg_extract(source_path, start, end, temp_clip)
 
-        # Slice the source-level prescan. If the source hasn't been
-        # prescanned yet this triggers an inline full-source scan (one-time;
-        # the result is cached for every future operation on this source).
-        _emit(progress_cb, "scan", 0, 1)
-        scan = scan_for_clip(source_path, start, end, identity_id=identity_id)
-        _emit(progress_cb, "scan", 1, 1)
-
-        per_frame_faces = _expand_to_per_frame(
-            scan["n_frames"], scan["faces"], scan.get("sample_offset_frames", 0),
-        )
-        track = _segment_crop_track(
-            scan["n_frames"], scan["src_w"], scan["src_h"],
-            per_frame_faces, scan["cuts"],
-        )
-
+        # Captions are independent of framing mode. Build the ASS once and
+        # let either encode path burn it in.
         ass_path: Path | None = None
         n_caption_words = 0
         clip_duration = end - start
@@ -887,6 +1075,57 @@ def export_clip(
             ass_path = Path(tmp) / "captions.ass"
             ass_path.write_text(ass_text, encoding="utf-8")
             n_caption_words = len(words)
+
+        if stage_mode:
+            # Stage skips the face scan entirely — no per-frame crop motion,
+            # whole source frame is shown.  Probe the extracted clip for fps
+            # so the progress callback has a sensible frame total.
+            probe = av.open(str(temp_clip))
+            vstream = probe.streams.video[0]
+            src_w_p, src_h_p = vstream.width, vstream.height
+            fps_p = float(vstream.average_rate)
+            probe.close()
+            total_frames = max(1, int(round(clip_duration * fps_p)))
+            _emit(progress_cb, "encode", 0, total_frames)
+            _encode_stage(
+                temp_clip, out_path, ass_path,
+                progress_cb=progress_cb, total_frames=total_frames,
+                duration_seconds=clip_duration,
+            )
+            _emit(progress_cb, "encode", total_frames, total_frames)
+            return {
+                "source": source_path.name,
+                "start": start,
+                "end": end,
+                "output": str(out_path),
+                "src_resolution": f"{src_w_p}x{src_h_p}",
+                "fps": fps_p,
+                "n_frames": total_frames,
+                "detected": 0,
+                "sampled": 0,
+                "detection_rate": 0.0,
+                "scene_cuts": 0,
+                "captioned": ass_path is not None,
+                "n_caption_words": n_caption_words,
+                "identity_id": None,
+                "zoom_level": "stage",
+                "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            }
+
+        # Face-tracked modes (tight / medium / wide / default) -- existing path.
+        _emit(progress_cb, "scan", 0, 1)
+        scan = scan_for_clip(source_path, start, end, identity_id=identity_id)
+        _emit(progress_cb, "scan", 1, 1)
+
+        per_frame_faces = _expand_to_per_frame(
+            scan["n_frames"], scan["faces"], scan.get("sample_offset_frames", 0),
+        )
+        track = _segment_crop_track(
+            scan["n_frames"], scan["src_w"], scan["src_h"],
+            per_frame_faces, scan["cuts"],
+            face_to_crop_h=resolve_zoom(zoom_level),
+            lock_camera=lock_camera,
+        )
 
         _emit(progress_cb, "encode", 0, scan["n_frames"])
         _encode(

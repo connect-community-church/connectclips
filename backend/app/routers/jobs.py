@@ -58,6 +58,8 @@ class ExportClipRequest(BaseModel):
     caption_margin_v: int | None = None
     include_hook_title: bool = True
     identity_id: int | None = None
+    zoom_level: str | None = None
+    lock_camera: bool = False
 
 
 @router.post("/export-clip", status_code=201)
@@ -72,6 +74,8 @@ async def create_export_clip_job(body: ExportClipRequest, request: Request) -> d
             caption_margin_v=body.caption_margin_v,
             include_hook_title=body.include_hook_title,
             identity_id=body.identity_id,
+            zoom_level=body.zoom_level,
+            lock_camera=body.lock_camera,
             user_login=u.login, user_name=u.name,
         )
     except FileNotFoundError as exc:

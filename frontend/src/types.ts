@@ -25,7 +25,14 @@ export type ClipUserEdits = {
   caption_margin_v?: number | null
   include_hook_title?: boolean
   identity_id?: number | null
+  // "tight" | "medium" | "wide". Unset = backend default ("medium").
+  zoom_level?: ZoomLevel | null
+  // true = static crop at median face position (no per-frame tracking).
+  // unset / false = smoothed tracking with deadband.
+  lock_camera?: boolean | null
 }
+
+export type ZoomLevel = 'tight' | 'medium' | 'wide' | 'stage'
 
 export type Clip = {
   start: number          // effective: Claude's value, overridden by user_edits.start if set

@@ -39,6 +39,8 @@ FIELDS: tuple[str, ...] = (
     "caption_margin_v",
     "include_hook_title",
     "identity_id",
+    "zoom_level",
+    "lock_camera",
 )
 
 

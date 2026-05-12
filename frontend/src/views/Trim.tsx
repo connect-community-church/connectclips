@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, fileUrl } from '../api'
-import type { Clip, Identity, Job, Sermon } from '../types'
+import type { Clip, Identity, Job, Sermon, ZoomLevel } from '../types'
 import { Publish } from './Publish'
 import { CaptionStylePicker } from './CaptionStylePicker'
 import { LivePreview } from './LivePreview'
@@ -99,6 +99,20 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
   const [identityId, setIdentityId] = useState<number | null>(
     userEdits.identity_id ?? null,
   )
+  // Zoom preset drives how much background sits around the pastor face. The
+  // backend stays the source of truth for the multiplier values (3.6 / 5.0 /
+  // 7.0). "medium" is the default the backend would otherwise pick on its
+  // own, so leaving it at "medium" is equivalent to no override.
+  const [zoomLevel, setZoomLevel] = useState<ZoomLevel>(
+    (userEdits.zoom_level as ZoomLevel | undefined) ?? 'medium',
+  )
+  // When on, the renderer ignores per-frame face tracking and emits a static
+  // crop at the median face position over the whole clip. Helps on a fixed
+  // PTZ camera with a stationary pastor where any motion reads as wobble.
+  // Doesn't apply to Stage mode (Stage already shows the full frame).
+  const [lockCamera, setLockCamera] = useState<boolean>(
+    userEdits.lock_camera ?? false,
+  )
 
   useEffect(() => {
     api.captionStyles()
@@ -158,6 +172,8 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
   const setIncludeHookTitleU: typeof setIncludeHookTitle = (v) => { setIncludeHookTitle(v); markDirty() }
   const setCaptionMarginVU: typeof setCaptionMarginV = (v) => { setCaptionMarginV(v); markDirty() }
   const setIdentityIdU: typeof setIdentityId = (v) => { setIdentityId(v); markDirty() }
+  const setZoomLevelU: typeof setZoomLevel = (v) => { setZoomLevel(v); markDirty() }
+  const setLockCameraU: typeof setLockCamera = (v) => { setLockCamera(v); markDirty() }
 
   // Reset caption position override when the volunteer picks a different style.
   // Different styles have different default positions and chunk sizes; carrying
@@ -177,6 +193,12 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
         include_hook_title: includeHookTitle,
         caption_margin_v: captionMarginV,
         identity_id: identityId,
+        // Saving "medium" would be harmless (the backend treats it the same
+        // as no override) but writing null keeps the stored override file
+        // small and makes the Reset-to-suggestion gate honest.
+        zoom_level: zoomLevel === 'medium' ? null : zoomLevel,
+        // false is the default; only persist when explicitly on.
+        lock_camera: lockCamera ? true : null,
       }).catch((e) => {
         // Network blip / backend hiccup; the next debounced write will
         // catch up. Surface in the dev console rather than blocking export.
@@ -186,7 +208,8 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
     return () => clearTimeout(t)
   }, [
     sermon.name, clipIndex,
-    start, end, styleKey, includeHookTitle, captionMarginV, identityId,
+    start, end, styleKey, includeHookTitle, captionMarginV, identityId, zoomLevel,
+    lockCamera,
   ])
 
   // Position the source video at start when clip changes
@@ -280,6 +303,8 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
       const j = await api.startExportClip(
         sermon.name, clipIndex, start, end, styleKey, includeHookTitle,
         captionMarginV, identityId,
+        zoomLevel === 'medium' ? null : zoomLevel,
+        lockCamera,
       )
       setExportJob(j)
     } catch (e) {
@@ -306,6 +331,8 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
     setIncludeHookTitle(true)
     setCaptionMarginV(null)
     setIdentityId(null)
+    setZoomLevel('medium')
+    setLockCamera(false)
   }
 
   // Decide whether to show the face picker.
@@ -467,7 +494,9 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
                 styleKey !== defaultStyleKey ||
                 !includeHookTitle ||
                 captionMarginV !== null ||
-                identityId !== null
+                identityId !== null ||
+                zoomLevel !== 'medium' ||
+                lockCamera
               ) && (
                 <button
                   className="secondary"
@@ -503,7 +532,46 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
             includeHookTitle={includeHookTitle}
             hookTitle={clip.title}
             identityId={identityId}
+            zoomLevel={zoomLevel}
+            lockCamera={lockCamera}
           />
+
+          <div className="zoom-picker">
+            <div className="muted small">Zoom</div>
+            <div className="zoom-picker-row">
+              {(['tight', 'medium', 'wide', 'stage'] as ZoomLevel[]).map((level) => (
+                <button
+                  key={level}
+                  className={`zoom-btn ${zoomLevel === level ? 'selected' : ''}`}
+                  onClick={() => setZoomLevelU(level)}
+                  title={
+                    level === 'tight' ? 'Closer crop — fills the frame with face and shoulders' :
+                    level === 'medium' ? 'Default — more pastor + background, less perceived jitter' :
+                    level === 'wide' ? 'Widest crop — full body / stage context where the source allows' :
+                    'Full source frame letterboxed onto a blurred copy of itself — no tracking, no jitter'
+                  }
+                >
+                  {level[0].toUpperCase() + level.slice(1)}
+                </button>
+              ))}
+            </div>
+            {zoomLevel !== 'stage' && (
+              <label
+                className="lock-camera-toggle"
+                title="Holds the crop perfectly still at the average pastor position. Best when the pastor doesn't move much; he could walk out of frame if he does."
+              >
+                <input
+                  type="checkbox"
+                  checked={lockCamera}
+                  onChange={(e) => setLockCameraU(e.target.checked)}
+                />
+                <span className="switch" aria-hidden="true">
+                  <span className="switch-thumb" />
+                </span>
+                <span>Lock camera (no tracking)</span>
+              </label>
+            )}
+          </div>
 
           {showFacePicker && (
             <div className="face-picker">

@@ -428,6 +428,79 @@ input[type="number"] {
   border-color: var(--accent, #4f9eff);
   box-shadow: 0 0 0 2px rgba(79, 158, 255, 0.25);
 }
+
+/* Zoom preset picker — sits beneath the live preview. Always visible, three
+   buttons that swap the face→crop-height multiplier the renderer uses. */
+.zoom-picker { margin-top: 12px; }
+.zoom-picker-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.zoom-btn {
+  background: var(--panel-2);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  color: var(--fg);
+  font-size: 13px;
+}
+.zoom-btn:hover { background: #2a323d; }
+.zoom-btn.selected {
+  border-color: var(--accent, #4f9eff);
+  box-shadow: 0 0 0 2px rgba(79, 158, 255, 0.25);
+  background: var(--accent, #4f9eff);
+  color: white;
+}
+.lock-camera-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+/* Visually hide the underlying checkbox but keep it focusable for
+   keyboard / screen readers. The styled .switch sibling renders the
+   visible toggle. */
+.lock-camera-toggle input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.lock-camera-toggle .switch {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 18px;
+  flex: 0 0 auto;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.lock-camera-toggle .switch-thumb {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 14px;
+  height: 14px;
+  background: var(--fg);
+  border-radius: 50%;
+  transition: transform 120ms ease, background 120ms ease;
+}
+.lock-camera-toggle input:checked ~ .switch {
+  background: var(--accent, #4f9eff);
+  border-color: var(--accent, #4f9eff);
+}
+.lock-camera-toggle input:checked ~ .switch .switch-thumb {
+  transform: translateX(16px);
+  background: white;
+}
+.lock-camera-toggle input:focus-visible ~ .switch {
+  box-shadow: 0 0 0 2px rgba(79, 158, 255, 0.35);
+}
 /* Caption style picker — custom dropdown with live preview thumbnails */
 .cs-picker { position: relative; }
 .cs-trigger {
