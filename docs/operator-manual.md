@@ -82,6 +82,8 @@ Click the new sermon's row to open its detail page.
 
 ![Sermon detail with two pipeline steps and Run buttons](screenshots/03-sermon-detail.png)
 
+**Full sermon YouTube URL** (admin-only, one-time per sermon) — the row directly under the title. Paste the YouTube URL of the full sermon upload here so each clip's "Copy full-sermon link" button can deep-link viewers to the exact moment in the full sermon. The field auto-saves on blur and shows a green `✓ <video_id>` badge when it parsed the URL successfully. Accepts `youtube.com/watch?v=…`, `youtu.be/…`, `/live/…`, `/shorts/…`. Volunteers see only a small read-only link when the URL is set — they don't edit it.
+
 Two numbered steps:
 
 **1. Transcribe** — Click **Run transcribe**. This takes 5–15 minutes for a typical sermon. The button reads "Running…" while it works. Walk away; you don't need to babysit it.
@@ -139,6 +141,21 @@ The vertical preview on the right starts up almost immediately because the face 
 
 **If the sermon has more than one speaker on camera** (a guest, a panel, an interview), a small **face strip** appears under the preview with one thumbnail per face the scanner found, plus an **Auto** pill. Click a thumbnail to lock the reframing onto that person; click **Auto** to let it pick the most prominent face per moment (the default and almost always right for a solo sermon, where the strip won't appear at all).
 
+#### Framing controls (Zoom + Lock camera)
+
+Below the preview is a small **Zoom** row with four buttons, plus a **Lock camera** toggle. These let you tune how the clip is framed without re-running anything — change a setting and the preview updates within a second. The choice is saved per clip and applied at export.
+
+| Zoom | What it does | When to pick it |
+|---|---|---|
+| **Tight** | Closer crop — fills the frame with the pastor's face + shoulders. | When you want a "talking head" focus. Use sparingly — easy to feel like a mugshot. |
+| **Medium** (default) | More pastor + background visible. Reads as natural framing. | Almost always. Start here. |
+| **Wide** | Widest crop the source allows — full body / stage context where there's enough source frame. | When the moment is more visual than vocal (gesture, walking, prop). |
+| **Stage** | Shows the **entire source frame** letterboxed onto a blurred copy of itself. No face tracking — the whole frame is always visible. | When the pastor moves around a lot, or when the full-frame stage context tells the story better than a tight crop. Most polished-looking on its own — no jitter possible. |
+
+**Lock camera (no tracking)** — the toggle below the zoom buttons. Off by default. When on, the crop holds perfectly still at the pastor's average position over the clip — zero motion at all. Use it for clips where the pastor stays put and you want absolute stillness (no following at all, even subtle). If he walks while it's on, he'll walk out of frame; that's the tradeoff.
+
+The toggle hides on Stage mode (Stage already shows the full frame — there's nothing to lock).
+
 When happy, click **Export vertical clip**. It runs for ~30–60 seconds. Don't navigate away.
 
 ### Step 5 — Verify the export
@@ -165,7 +182,7 @@ Three action buttons across the top:
 
 - **↓ Download MP4** — saves the clip to your Downloads folder. You'll drag this file into each platform's upload page.
 - **Copy title** — puts Claude's title on your clipboard. Paste into the platform's caption field.
-- **Copy full-sermon link** — only shows when the source came from YouTube. This is the URL of the original sermon at the exact timestamp the clip was taken from. **Critical for YouTube Shorts** — paste it into the "Related Video" field so viewers can click through to the full sermon.
+- **Copy full-sermon link** — shows when the sermon has a Full sermon YouTube URL set (Step 3) **or** the source was ingested from YouTube and the filename still has the video ID. Either way, it's the URL of the original sermon at the exact timestamp the clip was taken from. **Critical for YouTube Shorts** — paste it into the "Related Video" field so viewers can click through to the full sermon.
 
 Below those are four colored platform buttons:
 
@@ -314,6 +331,12 @@ The pastor's PiP at that moment was too small for the face tracker to see. Three
 **The reframing followed the wrong person** (e.g. a guest instead of the pastor).
 If the face strip appeared under the preview, click the correct face thumbnail and re-export. If no strip appeared, the scanner only found one face throughout the sermon — which usually means the "wrong" face is actually the only face on camera in that moment.
 
+**The exported clip feels too zoomed in, or like a handheld camcorder.**
+Below the preview, change **Zoom** from Medium to **Wide** or **Stage** and re-export. Stage shows the whole source frame on a blurred background — zero tracking, zero jitter, most polished. Wide pulls the crop out to show more of the pastor's body. If subtle wobble persists with face tracking, flip on **Lock camera (no tracking)** to freeze the crop entirely.
+
+**The full-sermon link doesn't appear on the Publish panel.**
+Two ways to get the link: (a) admin sets the Full sermon YouTube URL on the sermon detail page (Step 3), or (b) the sermon was ingested via YouTube and the filename still contains the video ID. If neither is true, the button hides. Easiest fix: ask the admin to paste the YouTube URL on the sermon detail page.
+
 **The trim view sits on "Scanning faces…" for a long time.**
 The face scan for this sermon hadn't finished yet when you clicked in. It runs in the background after transcribe; for a fresh upload it takes 5–15 minutes. Either wait a bit, or come back to this clip after working on a different sermon.
 
@@ -336,6 +359,9 @@ Hard-refresh the browser (Ctrl+Shift+R). The browser may be playing a cached old
 | Pick clips (or re-pick) | Sermon detail → Step 2 → set range → Run / Re-run |
 | Trim and export a clip | Click "Preview / trim / export" on a clip card |
 | Pick which face to follow | Trim view → face strip under the preview (only shows when >1 face) |
+| Change zoom level (Tight / Medium / Wide / Stage) | Trim view → Zoom buttons under the preview |
+| Stop the crop from tracking | Trim view → Lock camera toggle under the Zoom buttons |
+| Set the full-sermon YouTube URL | Sermon detail → "Full sermon YouTube URL" row under the title (admin only) |
 | Download a finished clip | Trim view → Publish panel → ↓ Download MP4 |
 | Get the YouTube deep-link | Trim view → Publish panel → Copy full-sermon link |
 | Open a platform's upload page | Trim view → Publish panel → colored platform button |
