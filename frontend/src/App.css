@@ -266,6 +266,22 @@ input[type="number"] {
 
 /* Sermon list */
 .sermon-list ul { list-style: none; padding: 0; margin: 0; }
+.sermon-sort {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.sermon-sort select {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
 .sermon-row {
   background: var(--panel);
   border: 1px solid var(--border);

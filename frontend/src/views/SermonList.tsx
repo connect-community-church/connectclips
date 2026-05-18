@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
 import type { Sermon } from '../types'
 import { AddSermon } from './AddSermon'
@@ -11,6 +11,15 @@ type Props = {
   uploadActive: boolean
 }
 
+type SortKey = 'date-desc' | 'date-asc' | 'name-asc' | 'name-desc'
+
+const SORT_STORAGE_KEY = 'connectclips.sermonSort'
+const DEFAULT_SORT: SortKey = 'date-desc'
+
+function isSortKey(v: string | null): v is SortKey {
+  return v === 'date-desc' || v === 'date-asc' || v === 'name-asc' || v === 'name-desc'
+}
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
@@ -18,10 +27,43 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`
 }
 
+function sortSermons(items: Sermon[], key: SortKey): Sermon[] {
+  const sorted = [...items]
+  switch (key) {
+    case 'date-desc':
+      sorted.sort((a, b) => b.modified_at.localeCompare(a.modified_at))
+      break
+    case 'date-asc':
+      sorted.sort((a, b) => a.modified_at.localeCompare(b.modified_at))
+      break
+    case 'name-asc':
+      sorted.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
+      break
+    case 'name-desc':
+      sorted.sort((a, b) => b.name.localeCompare(a.name, undefined, { numeric: true, sensitivity: 'base' }))
+      break
+  }
+  return sorted
+}
+
 export function SermonList({ admin, onOpen, onDeleted, onUpload, uploadActive }: Props) {
   const [sermons, setSermons] = useState<Sermon[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [sortKey, setSortKey] = useState<SortKey>(() => {
+    const stored = typeof window !== 'undefined' ? window.localStorage.getItem(SORT_STORAGE_KEY) : null
+    return isSortKey(stored) ? stored : DEFAULT_SORT
+  })
+
+  const onSortChange = (v: SortKey) => {
+    setSortKey(v)
+    try { window.localStorage.setItem(SORT_STORAGE_KEY, v) } catch { /* ignore */ }
+  }
+
+  const sortedSermons = useMemo(
+    () => (sermons ? sortSermons(sermons, sortKey) : null),
+    [sermons, sortKey],
+  )
 
   const refresh = useCallback(() => {
     api.listSermons().then(setSermons).catch((e) => setError(String(e)))
@@ -58,9 +100,23 @@ export function SermonList({ admin, onOpen, onDeleted, onUpload, uploadActive }:
       {sermons && sermons.length === 0 && (
         <div className="empty">No sermons yet — add one above.</div>
       )}
-      {sermons && sermons.length > 0 && (
-        <ul>
-          {sermons.map((s) => (
+      {sortedSermons && sortedSermons.length > 0 && (
+        <>
+          <div className="sermon-sort">
+            <label htmlFor="sermon-sort-select">Sort</label>
+            <select
+              id="sermon-sort-select"
+              value={sortKey}
+              onChange={(e) => onSortChange(e.target.value as SortKey)}
+            >
+              <option value="date-desc">Date — newest first</option>
+              <option value="date-asc">Date — oldest first</option>
+              <option value="name-asc">Name — A to Z</option>
+              <option value="name-desc">Name — Z to A</option>
+            </select>
+          </div>
+          <ul>
+            {sortedSermons.map((s) => (
             <li key={s.name} className="sermon-row" onClick={() => onOpen(s)}>
               <div className="name">{s.name}</div>
               <div className="meta">
@@ -86,8 +142,9 @@ export function SermonList({ admin, onOpen, onDeleted, onUpload, uploadActive }:
                 </div>
               )}
             </li>
-          ))}
-        </ul>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   )
