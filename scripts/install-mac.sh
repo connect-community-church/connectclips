@@ -217,7 +217,7 @@ step_env_file() {
     else
         [[ $is_tty -eq 1 ]] || fail "Need an API key. Either run interactively or set CONNECTCLIPS_API_KEY."
         printf '\nEnter your Anthropic API key (sk-ant-...): ' >&2
-        IFS= read -rs api_key
+        IFS= read -rs api_key < /dev/tty || fail "Could not read API key from terminal"
         echo >&2
     fi
     [[ -n "$api_key" ]] || fail "API key cannot be empty"
@@ -229,7 +229,7 @@ step_env_file() {
     else
         [[ $is_tty -eq 1 ]] || fail "Need an admin password. Either run interactively or set CONNECTCLIPS_ADMIN_PASSWORD."
         printf 'Choose an admin password: ' >&2
-        IFS= read -rs admin_pw
+        IFS= read -rs admin_pw < /dev/tty || fail "Could not read admin password from terminal"
         echo >&2
     fi
     [[ -n "$admin_pw" ]] || fail "admin password cannot be empty"
