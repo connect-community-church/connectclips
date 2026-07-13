@@ -7,6 +7,15 @@ export type Sermon = {
   n_clips: number
 }
 
+// Admin-tunable clip-selection settings (Settings view ↔ /api/app-settings).
+export type ThinkingEffort = 'low' | 'medium' | 'high'
+export type AppSettings = {
+  clip_thinking_effort: ThinkingEffort
+  clip_max_output_tokens: number
+  num_clips_min: number
+  num_clips_max: number
+}
+
 export type PreviousExport = {
   filename: string
   start: number

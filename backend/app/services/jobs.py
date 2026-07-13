@@ -31,7 +31,7 @@ from typing import Literal
 
 from app import db
 from app.config import settings
-from app.services import clip_selection, ingest, reframe, transcribe
+from app.services import app_settings, clip_selection, ingest, reframe, transcribe
 
 JobKind = Literal["transcribe", "youtube_download", "select_clips", "export_clip", "upload", "prescan_faces"]
 JobStatus = Literal["queued", "running", "done", "failed"]
@@ -443,10 +443,9 @@ async def _run_select_clips(
 
 
 # ---------- Auto-pipeline chaining --------------------------------------
-# Default range when the auto-pipeline triggers select-clips. Skewed toward 8
-# so the volunteer typically gets ~8 candidates and picks the best 5.
-_AUTO_CLIPS_MIN = 7
-_AUTO_CLIPS_MAX = 10
+# The clip-count range used when the auto-pipeline triggers select-clips is
+# admin-configurable (Settings UI → app_settings). Defaults to 7..10 so the
+# volunteer typically gets ~8 candidates and picks the best 5.
 
 
 def _maybe_chain_transcribe(source_name: str, *, user_login: str | None = None, user_name: str | None = None) -> None:
@@ -470,8 +469,9 @@ def _maybe_chain_select_clips(source_name: str, *, user_login: str | None = None
     if clip_selection.clips_path_for(source_name).exists():
         return
     try:
+        cfg = app_settings.load()
         create_select_clips_job(
-            source_name, _AUTO_CLIPS_MIN, _AUTO_CLIPS_MAX,
+            source_name, cfg["num_clips_min"], cfg["num_clips_max"],
             user_login=user_login, user_name=user_name,
         )
     except Exception:

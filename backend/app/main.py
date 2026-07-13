@@ -52,6 +52,7 @@ class SPAStaticFiles(StaticFiles):
 from app import db
 from app import platform as plat
 from app.config import settings
+from app.routers import app_settings as app_settings_router
 from app.routers import auth as auth_router
 from app.routers import jobs as jobs_router
 from app.routers import me as me_router
@@ -129,6 +130,7 @@ app.include_router(sermons_router.router, prefix=_API_PREFIX)
 app.include_router(jobs_router.router, prefix=_API_PREFIX)
 app.include_router(usage_router.router, prefix=_API_PREFIX)
 app.include_router(publish_targets_router.router, prefix=_API_PREFIX)
+app.include_router(app_settings_router.router,    prefix=_API_PREFIX)
 
 
 @app.get(f"{_API_PREFIX}/caption-styles")

@@ -11,13 +11,21 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 import uuid
 from pathlib import Path
 
 from anthropic import Anthropic
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from app.config import settings
+from app.services import app_settings
+
+logger = logging.getLogger(__name__)
+
+# Absolute upper bound for the auto-retry so a misconfigured ceiling can't
+# balloon a single call's cost without limit. Matches the settings clamp.
+_HARD_TOKEN_CAP = 64000
 
 
 class ClipCandidate(BaseModel):
@@ -143,36 +151,85 @@ def select_clips(
     )
 
     client = _get_client()
-    # cache_control on the last user content block caches the full prefix
-    # (system + transcript). Min cacheable prefix on Sonnet 4.6 is 2048 tokens
-    # — the transcript alone clears that comfortably. Useful when iterating on
-    # prompts or re-running the same sermon within 5 min.
-    response = client.messages.parse(
-        model=settings.claude_model,
-        # Adaptive thinking can spend a chunk of tokens before output starts.
-        # 12K leaves ample room for ~12 clips with rationales and avoids the
-        # silent truncation → parsed_output=None failure mode we hit at 4K.
-        max_tokens=12000,
-        thinking={"type": "adaptive"},
-        output_config={"effort": "medium"},
-        system=SYSTEM_PROMPT,
-        messages=[{
-            "role": "user",
-            "content": [{
-                "type": "text",
-                "text": user_text,
-                "cache_control": {"type": "ephemeral"},
-            }],
-        }],
-        output_format=ClipSelection,
-    )
 
-    selection: ClipSelection | None = response.parsed_output
+    # Runtime, admin-tunable knobs (Settings UI → app_settings.json):
+    #   effort     -- the quality dial (low/medium/high) for adaptive thinking.
+    #   max_tokens -- SAFETY ceiling covering thinking + JSON output combined.
+    # Thinking is the variable cost here (the clip JSON is only ~2-4K tokens);
+    # a generous default ceiling keeps a long, dense sermon from truncating the
+    # output. See app_settings.py for the rationale and defaults.
+    cfg = app_settings.load()
+    effort = cfg["clip_thinking_effort"]
+    base_tokens = int(cfg["clip_max_output_tokens"])
+
+    # Self-healing: if thinking overruns the ceiling, the JSON is cut off
+    # mid-string and the SDK either raises a JSON ValidationError while parsing
+    # or returns parsed_output=None with stop_reason="max_tokens". Both mean
+    # "truncated" — retry once at double the ceiling before giving up.
+    attempts = [base_tokens]
+    if base_tokens * 2 <= _HARD_TOKEN_CAP and base_tokens < _HARD_TOKEN_CAP:
+        attempts.append(min(base_tokens * 2, _HARD_TOKEN_CAP))
+
+    response = None
+    selection: ClipSelection | None = None
+    last_reason = ""
+    for i, budget in enumerate(attempts):
+        more = i + 1 < len(attempts)
+        # The SDK forces streaming for non-streaming calls it *estimates* could
+        # exceed 10 min (roughly max_tokens ≳ 21K, via a very conservative
+        # 128K-tokens/hour assumption). Our output is small and thinking-bound,
+        # so it finishes far faster than that estimate — pass an explicit
+        # timeout to opt out of the guard while still bounding the wait. Scale
+        # it with the budget and cap at 30 min so a retry at a high ceiling
+        # still has room.
+        req_timeout = min(1800.0, 180.0 + budget / 128_000 * 3600)
+        try:
+            # cache_control on the last user content block caches the full prefix
+            # (system + transcript). Min cacheable prefix on Sonnet 4.6 is 2048
+            # tokens — the transcript alone clears that comfortably.
+            response = client.messages.parse(
+                model=settings.claude_model,
+                max_tokens=budget,
+                thinking={"type": "adaptive"},
+                output_config={"effort": effort},
+                timeout=req_timeout,
+                system=SYSTEM_PROMPT,
+                messages=[{
+                    "role": "user",
+                    "content": [{
+                        "type": "text",
+                        "text": user_text,
+                        "cache_control": {"type": "ephemeral"},
+                    }],
+                }],
+                output_format=ClipSelection,
+            )
+        except ValidationError:
+            # Truncated JSON → unparseable. Retry larger if we can.
+            last_reason = f"unparseable JSON (truncated) at max_tokens={budget}"
+            logger.warning(
+                "Clip selection %s. %s",
+                last_reason, "Retrying larger…" if more else "Out of retries.",
+            )
+            continue
+
+        selection = response.parsed_output
+        if selection is not None:
+            break  # success
+
+        # Returned, but nothing parseable — almost always max_tokens truncation.
+        last_reason = f"no parseable output (stop_reason={response.stop_reason}) at max_tokens={budget}"
+        logger.warning(
+            "Clip selection %s. %s",
+            last_reason, "Retrying larger…" if more else "Out of retries.",
+        )
+
     if selection is None:
         raise RuntimeError(
-            f"Claude returned no parseable clips (stop_reason={response.stop_reason}). "
-            f"This usually means max_tokens was too low for the requested range; "
-            f"try a smaller num_clips_max."
+            "Claude could not return a complete clip list — "
+            f"{last_reason}. The sermon may be unusually long/dense. Raise "
+            "'Max output tokens' (or lower 'Thinking effort') in Settings and "
+            "re-run Pick clips."
         )
     raw_clips = [c.model_dump() for c in selection.clips]
     words = _flat_words(transcript)

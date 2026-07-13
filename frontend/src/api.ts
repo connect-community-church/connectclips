@@ -1,4 +1,4 @@
-import type { ClipsFile, ClipUserEdits, IdentitiesResponse, Job, Me, Sermon, Track, TranscriptWord, UsageResponse } from './types'
+import type { AppSettings, ClipsFile, ClipUserEdits, IdentitiesResponse, Job, Me, Sermon, Track, TranscriptWord, UsageResponse } from './types'
 
 async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`/api${path}`, {
@@ -124,6 +124,12 @@ export const api = {
       '/publish-targets',
       { method: 'PUT', body: JSON.stringify(body) },
     ),
+
+  // Admin-tunable clip-selection settings (thinking effort, output ceiling,
+  // clip count range). GET is open (Settings view reads it); PUT is admin-only.
+  getAppSettings: () => jsonFetch<AppSettings>('/app-settings'),
+  saveAppSettings: (body: Partial<AppSettings>) =>
+    jsonFetch<AppSettings>('/app-settings', { method: 'PUT', body: JSON.stringify(body) }),
 
   // Per-sermon metadata -- currently just the full-sermon YouTube URL that
   // each clip's "watch from this moment" deep link points at. GET is open;
