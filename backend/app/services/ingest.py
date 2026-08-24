@@ -76,8 +76,7 @@ def download_youtube(url: str, dest_dir: Path, progress_cb: ProgressCB | None = 
         elif status == "finished":
             progress_cb("Merging audio + video", 0.99)
 
-    opts = {
-        "format": "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+    base_opts = {
         "merge_output_format": "mp4",
         "outtmpl": outtmpl,
         "restrictfilenames": True,
@@ -86,15 +85,53 @@ def download_youtube(url: str, dest_dir: Path, progress_cb: ProgressCB | None = 
         "no_warnings": True,
         "progress_hooks": [_hook],
     }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        # prepare_filename gives the path before merge; after merge it'll have
-        # merge_output_format extension. requested_downloads has the actual final.
-        downloads = info.get("requested_downloads") or []
-        if downloads:
-            return Path(downloads[0]["filepath"])
-        # Fallback: derive from template
-        return Path(ydl.prepare_filename(info)).with_suffix(f".{opts['merge_output_format']}")
+
+    def _download_with_opts(opts: dict) -> Path:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            # prepare_filename gives the path before merge; after merge it'll have
+            # merge_output_format extension. requested_downloads has the actual final.
+            downloads = info.get("requested_downloads") or []
+            if downloads:
+                return Path(downloads[0]["filepath"])
+            # Fallback: derive from template
+            return Path(ydl.prepare_filename(info)).with_suffix(f".{opts['merge_output_format']}")
+
+    primary_opts = {
+        **base_opts,
+        # Prefer HLS streams when YouTube offers them. For recently-public
+        # videos, DASH https streams can expose metadata but fail immediately
+        # with HTTP 403; HLS avoids that while still allowing up to 1080p.
+        "format": "bestvideo[height<=1080][protocol=m3u8_native]+bestaudio[protocol=m3u8_native]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+    }
+    try:
+        return _download_with_opts(primary_opts)
+    except yt_dlp.utils.DownloadError as exc:
+        # Some freshly-public YouTube videos expose metadata but return 403 for
+        # separate DASH video streams. Retrying with a progressive MP4 stream
+        # avoids leaving the volunteer stuck after a privacy flip; quality is
+        # lower, but it reliably produces a source file that can be clipped.
+        if "HTTP Error 403" not in str(exc):
+            raise
+        if progress_cb is not None:
+            progress_cb("1080p stream was blocked; retrying compatible stream", 0.0)
+        video_id_match = re.search(r"(?:v=|youtu\.be/|/live/)([A-Za-z0-9_-]{11})", url)
+        if video_id_match:
+            for part in dest_dir.glob(f"*{video_id_match.group(1)}*.part"):
+                try:
+                    part.unlink()
+                except OSError:
+                    pass
+            for part in dest_dir.glob(f"*{video_id_match.group(1)}*.ytdl"):
+                try:
+                    part.unlink()
+                except OSError:
+                    pass
+        fallback_opts = {
+            **base_opts,
+            "format": "18/best[vcodec!=none][acodec!=none][height<=720][ext=mp4]/best[vcodec!=none][acodec!=none][height<=720]/best[height<=720]",
+        }
+        return _download_with_opts(fallback_opts)
 
 
 def _sanitize_basename(name: str) -> str:
