@@ -31,9 +31,12 @@ from typing import Literal
 
 from app import db
 from app.config import settings
-from app.services import clip_selection, ingest, reframe, transcribe
+from app.services import app_settings, clip_selection, ingest, reframe, transcribe
 
-JobKind = Literal["transcribe", "youtube_download", "select_clips", "export_clip", "upload", "prescan_faces"]
+JobKind = Literal[
+    "transcribe", "youtube_download", "select_clips", "export_clip", "upload",
+    "prescan_faces", "track_missing_url",
+]
 JobStatus = Literal["queued", "running", "done", "failed"]
 
 _JOB_COLUMNS = (
@@ -197,6 +200,38 @@ def finish_upload_job(job_id: str, *, error: str | None = None) -> Job | None:
     return job
 
 
+def create_tracking_missing_url_job(
+    source_name: str,
+    clip_index: int,
+    platform: str,
+    *,
+    user_login: str | None = None,
+    user_name: str | None = None,
+) -> Job:
+    """Record that a volunteer tried to save tracking without a posted URL.
+
+    This is intentionally written to the normal Activity/jobs table, not the
+    social_posts table, because no trackable post exists yet. It lets admins
+    distinguish "volunteer never clicked Save & track" from "volunteer clicked
+    it but did not paste the URL from YouTube Studio/TikTok/etc.".
+    """
+    now = dt.datetime.now(dt.timezone.utc).isoformat()
+    job = _new_job(
+        kind="track_missing_url",
+        source=source_name,
+        clip_index=clip_index,
+        url=platform,
+        user_login=user_login,
+        user_name=user_name,
+    )
+    job.status = "failed"
+    job.started_at = now
+    job.finished_at = now
+    job.error = f"Clicked Save & track for {platform} without pasting the published post URL."
+    _save(job)
+    return job
+
+
 def create_youtube_download_job(url: str, *, user_login: str | None = None, user_name: str | None = None) -> Job:
     job = _new_job(kind="youtube_download", url=url, user_login=user_login, user_name=user_name)
     asyncio.create_task(_run_youtube(job, url))
@@ -222,6 +257,7 @@ def create_select_clips_job(
     num_clips_min: int = 3,
     num_clips_max: int = 8,
     *,
+    selection_mode: str = "shorts",
     user_login: str | None = None,
     user_name: str | None = None,
 ) -> Job:
@@ -229,6 +265,7 @@ def create_select_clips_job(
         raise ValueError(
             f"invalid clip-count range: min={num_clips_min}, max={num_clips_max}"
         )
+    selection_mode = "deeper" if str(selection_mode).lower().strip() == "deeper" else "shorts"
     transcript_path = transcribe.transcript_path_for(source_name)
     if not transcript_path.is_file():
         raise FileNotFoundError(f"transcript not found for {source_name} (run transcribe first)")
@@ -236,7 +273,7 @@ def create_select_clips_job(
         kind="select_clips", source=source_name,
         user_login=user_login, user_name=user_name,
     )
-    asyncio.create_task(_run_select_clips(job, transcript_path, num_clips_min, num_clips_max))
+    asyncio.create_task(_run_select_clips(job, transcript_path, num_clips_min, num_clips_max, selection_mode))
     return job
 
 
@@ -244,6 +281,7 @@ def create_export_clip_job(
     source_name: str,
     clip_index: int,
     *,
+    selection_mode: str = "shorts",
     start_override: float | None = None,
     end_override: float | None = None,
     caption_style: str | None = None,
@@ -252,13 +290,15 @@ def create_export_clip_job(
     identity_id: int | None = None,
     zoom_level: str | None = None,
     lock_camera: bool = False,
+    panels: list[int] | None = None,
     user_login: str | None = None,
     user_name: str | None = None,
 ) -> Job:
     src = settings.data_sources_dir / source_name
     if not src.is_file():
         raise FileNotFoundError(f"source not found: {source_name}")
-    clips_path = clip_selection.clips_path_for(source_name)
+    selection_mode = "deeper" if str(selection_mode).lower().strip() == "deeper" else "shorts"
+    clips_path = clip_selection.clips_path_for(source_name, selection_mode)
     if not clips_path.is_file():
         raise FileNotFoundError(f"clips.json not found for {source_name} (run select-clips first)")
     clips_data = json.loads(clips_path.read_text())
@@ -277,7 +317,8 @@ def create_export_clip_job(
     # fall back to "legacy" so those still produce a deterministic filename.
     clips_version = clips_data.get("clips_version") or "legacy"
     version_short = clips_version[:8]
-    output_name = f"{Path(source_name).stem}-clip-{clip_index}-v{version_short}.mp4"
+    mode_suffix = "-deeper" if selection_mode == "deeper" else ""
+    output_name = f"{Path(source_name).stem}{mode_suffix}-clip-{clip_index}-v{version_short}.mp4"
     hook_title = clip.get("title") if include_hook_title else None
     job = _new_job(
         kind="export_clip", source=source_name,
@@ -295,6 +336,7 @@ def create_export_clip_job(
         identity_id,
         zoom_level,
         lock_camera,
+        panels,
     ))
     return job
 
@@ -420,17 +462,19 @@ async def _run_select_clips(
     transcript_path: Path,
     num_clips_min: int,
     num_clips_max: int,
+    selection_mode: str = "shorts",
 ) -> None:
     await _start(job)
     try:
         # No streaming progress for select_clips — it's one Anthropic call.
         # Set a message so the UI can render something more useful than
         # just "running" while we wait the ~30 s for Claude to respond.
-        job.progress_message = f"Calling Claude ({settings.claude_model})…"
+        label = "Deeper Clips" if selection_mode == "deeper" else "Shorts"
+        job.progress_message = f"Calling Claude ({settings.claude_model}) for {label}…"
         _save(job)
 
         result = await asyncio.to_thread(
-            clip_selection.select_clips, transcript_path, num_clips_min, num_clips_max,
+            clip_selection.select_clips, transcript_path, num_clips_min, num_clips_max, selection_mode,
         )
         out = await asyncio.to_thread(clip_selection.write_clips, result)
         job.clips_path = str(out)
@@ -443,10 +487,9 @@ async def _run_select_clips(
 
 
 # ---------- Auto-pipeline chaining --------------------------------------
-# Default range when the auto-pipeline triggers select-clips. Skewed toward 8
-# so the volunteer typically gets ~8 candidates and picks the best 5.
-_AUTO_CLIPS_MIN = 7
-_AUTO_CLIPS_MAX = 10
+# The clip-count range used when the auto-pipeline triggers select-clips is
+# admin-configurable (Settings UI → app_settings). Defaults to 7..10 so the
+# volunteer typically gets ~8 candidates and picks the best 5.
 
 
 def _maybe_chain_transcribe(source_name: str, *, user_login: str | None = None, user_name: str | None = None) -> None:
@@ -464,18 +507,25 @@ def _maybe_chain_transcribe(source_name: str, *, user_login: str | None = None, 
 
 
 def _maybe_chain_select_clips(source_name: str, *, user_login: str | None = None, user_name: str | None = None) -> None:
-    """Trigger clip selection iff the transcript exists and clips.json doesn't."""
+    """Trigger Shorts and Deeper Clips iff transcript exists and each set is missing."""
     if not transcribe.transcript_path_for(source_name).is_file():
         return
-    if clip_selection.clips_path_for(source_name).exists():
-        return
-    try:
-        create_select_clips_job(
-            source_name, _AUTO_CLIPS_MIN, _AUTO_CLIPS_MAX,
-            user_login=user_login, user_name=user_name,
-        )
-    except Exception:
-        pass
+    cfg = app_settings.load()
+    plans = [
+        ("shorts", cfg["num_clips_min"], cfg["num_clips_max"]),
+        ("deeper", 1, 2),
+    ]
+    for mode, min_clips, max_clips in plans:
+        if clip_selection.clips_path_for(source_name, mode).exists():
+            continue
+        try:
+            create_select_clips_job(
+                source_name, min_clips, max_clips,
+                selection_mode=mode,
+                user_login=user_login, user_name=user_name,
+            )
+        except Exception:
+            pass
 
 
 def _maybe_chain_prescan(source_name: str, *, user_login: str | None = None, user_name: str | None = None) -> None:
@@ -514,6 +564,7 @@ async def _run_export_clip(
     identity_id: int | None = None,
     zoom_level: str | None = None,
     lock_camera: bool = False,
+    panels: list[int] | None = None,
 ) -> None:
     await _start(job)
 
@@ -536,7 +587,7 @@ async def _run_export_clip(
         result = await asyncio.to_thread(
             reframe.export_clip, src, job.start, job.end, output_name, transcript_path,
             progress_cb, caption_style, hook_title, caption_margin_v, identity_id,
-            zoom_level, lock_camera,
+            zoom_level, lock_camera, panels,
         )
         job.output_clip_path = result["output"]
         job.progress_percent = 1.0

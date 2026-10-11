@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
-import type { Clip, ClipsFile, Job, Sermon } from '../types'
+import type { Clip, ClipSelectionMode, ClipsFile, Job, Sermon, SocialPost } from '../types'
 
 type Props = {
   sermon: Sermon
   admin: boolean
   onBack: () => void
-  onTrim: (clip: Clip, clipIndex: number) => void
+  onTrim: (clip: Clip, clipIndex: number, selectionMode: ClipSelectionMode) => void
+  initialSelectionMode?: ClipSelectionMode
   onDeleted: () => void
 }
 
@@ -67,13 +68,110 @@ function hookScoreClass(score: number): string {
   return 'low'
 }
 
-export function SermonDetail({ sermon, admin, onBack, onTrim, onDeleted }: Props) {
+const PLATFORM_LABELS: Record<string, string> = {
+  youtube: 'YouTube', tiktok: 'TikTok', facebook: 'Facebook', instagram: 'Instagram', other: 'Other',
+}
+
+function fmtCount(n: number | null | undefined): string {
+  if (n == null) return '—'
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K'
+  return String(n)
+}
+
+const IconEye = () => (
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M12 5C7 5 2.7 8.1 1 12c1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9zm0-7A2.5 2.5 0 1 0 12 14.5 2.5 2.5 0 0 0 12 9.5z"/>
+  </svg>
+)
+const IconThumbsUp = () => (
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M1 10h4v12H1zM23 11c0-1.1-.9-2-2-2h-6.3l1-4.6.03-.34c0-.4-.17-.78-.44-1.05L14.17 2 7.59 8.59C7.22 8.95 7 9.45 7 10v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-1.91z"/>
+  </svg>
+)
+const IconChat = () => (
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M4 3h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2z"/>
+  </svg>
+)
+
+function SermonSocialTotals({ postsByClip }: { postsByClip: Record<number, SocialPost[]> }) {
+  const all = Object.values(postsByClip).flat()
+  if (all.length === 0) return null
+
+  const totals = all.reduce(
+    (a, p) => ({
+      views:    a.views    + (p.views    ?? 0),
+      likes:    a.likes    + (p.likes    ?? 0),
+      comments: a.comments + (p.comments ?? 0),
+    }),
+    { views: 0, likes: 0, comments: 0 },
+  )
+
+  const byPlatform = new Map<string, { views: number; likes: number; comments: number; count: number }>()
+  for (const p of all) {
+    const cur = byPlatform.get(p.platform) ?? { views: 0, likes: 0, comments: 0, count: 0 }
+    cur.views    += p.views    ?? 0
+    cur.likes    += p.likes    ?? 0
+    cur.comments += p.comments ?? 0
+    cur.count    += 1
+    byPlatform.set(p.platform, cur)
+  }
+
+  return (
+    <section className="sermon-social-totals">
+      <div className="totals-row">
+        <span className="muted small">Across {all.length} tracked post{all.length === 1 ? '' : 's'}:</span>
+        <span className="totals-stat"><IconEye /> {fmtCount(totals.views)}</span>
+        <span className="totals-stat"><IconThumbsUp /> {fmtCount(totals.likes)}</span>
+        <span className="totals-stat"><IconChat /> {fmtCount(totals.comments)}</span>
+      </div>
+      <div className="clip-social-summary">
+        {Array.from(byPlatform.entries()).map(([platform, s]) => (
+          <span key={platform} className={'platform-badge platform-' + platform}>
+            {PLATFORM_LABELS[platform] ?? platform}
+            <span className="platform-stat" aria-label="views"><IconEye /> {fmtCount(s.views)}</span>
+            <span className="platform-stat" aria-label="likes"><IconThumbsUp /> {fmtCount(s.likes)}</span>
+            <span className="platform-stat" aria-label="comments"><IconChat /> {fmtCount(s.comments)}</span>
+          </span>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function ClipSocialSummary({ posts }: { posts: SocialPost[] }) {
+  if (posts.length === 0) return null
+  return (
+    <div className="clip-social-summary">
+      {posts.map((p) => (
+        <span
+          key={p.id}
+          className={'platform-badge platform-' + p.platform}
+          title={p.post_url ?? ''}
+        >
+          {PLATFORM_LABELS[p.platform] ?? p.platform}
+          <span className="platform-stat" aria-label="views"><IconEye /> {fmtCount(p.views)}</span>
+          {p.likes != null && (
+            <span className="platform-stat" aria-label="likes"><IconThumbsUp /> {fmtCount(p.likes)}</span>
+          )}
+          {p.comments != null && (
+            <span className="platform-stat" aria-label="comments"><IconChat /> {fmtCount(p.comments)}</span>
+          )}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+export function SermonDetail({ sermon, admin, onBack, onTrim, initialSelectionMode = 'shorts', onDeleted }: Props) {
   const [clips, setClips] = useState<ClipsFile | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [activeJobs, setActiveJobs] = useState<Job[]>([])
   const [deleting, setDeleting] = useState(false)
   const [minClips, setMinClips] = useState(3)
   const [maxClips, setMaxClips] = useState(8)
+  const [selectionMode, setSelectionMode] = useState<ClipSelectionMode>(initialSelectionMode)
   // Full-sermon YouTube URL drives the "watch from this moment" deep link in
   // the Publish view. Stored as a sidecar per sermon; admin edits it once
   // per sermon and volunteers consume the resulting deep link.
@@ -81,14 +179,28 @@ export function SermonDetail({ sermon, admin, onBack, onTrim, onDeleted }: Props
   const [programVideoId, setProgramVideoId] = useState<string | null>(null)
   const [urlError, setUrlError] = useState<string | null>(null)
   const [urlSaving, setUrlSaving] = useState(false)
+  const [postsByClip, setPostsByClip] = useState<Record<number, SocialPost[]>>({})
+
+  useEffect(() => {
+    api.listPosts({ sermon_source: sermon.name })
+      .then((r) => {
+        const grouped: Record<number, SocialPost[]> = {}
+        for (const p of r.posts) {
+          if (p.clip_index == null) continue
+          ;(grouped[p.clip_index] ??= []).push(p)
+        }
+        setPostsByClip(grouped)
+      })
+      .catch(() => setPostsByClip({}))
+  }, [sermon.name])
 
   const refreshClips = useCallback(() => {
     if (!sermon.clips_selected) {
       setClips(null)
       return
     }
-    api.getClips(sermon.name).then(setClips).catch((e) => setError(String(e)))
-  }, [sermon.name, sermon.clips_selected])
+    api.getClips(sermon.name, selectionMode).then(setClips).catch((e) => setError(String(e)))
+  }, [sermon.name, sermon.clips_selected, selectionMode])
 
   useEffect(() => {
     refreshClips()
@@ -157,7 +269,7 @@ export function SermonDetail({ sermon, admin, onBack, onTrim, onDeleted }: Props
 
   const onTranscribe = () => api.startTranscribe(sermon.name).catch((e) => setError(String(e)))
   const onSelectClips = () =>
-    api.startSelectClips(sermon.name, minClips, maxClips).catch((e) => setError(String(e)))
+    api.startSelectClips(sermon.name, minClips, maxClips, selectionMode).catch((e) => setError(String(e)))
   const onDelete = async () => {
     if (!window.confirm(`Delete "${sermon.name}"?\n\nThis removes the source file, transcript, clips.json, and every exported MP4.`)) return
     setDeleting(true)
@@ -182,6 +294,8 @@ export function SermonDetail({ sermon, admin, onBack, onTrim, onDeleted }: Props
         )}
       </div>
       <h1 title={sermon.name}>{sermon.name}</h1>
+
+      <SermonSocialTotals postsByClip={postsByClip} />
 
       {error && <div className="error">Error: {error}</div>}
 
@@ -242,6 +356,25 @@ export function SermonDetail({ sermon, admin, onBack, onTrim, onDeleted }: Props
         <div className="step">
           <div className="step-title">2. Pick clips</div>
           <div className="clip-count-controls">
+            <label className="muted">Mode</label>
+            <select
+              value={selectionMode}
+              onChange={(e) => {
+                const mode = e.target.value as ClipSelectionMode
+                setSelectionMode(mode)
+                if (mode === 'deeper') {
+                  setMinClips(1)
+                  setMaxClips(2)
+                } else {
+                  setMinClips(3)
+                  setMaxClips(8)
+                }
+              }}
+              title="Shorts finds 30–90 second clips. Deeper Clips finds 2:30–5:00 midweek excerpts from the whole sermon."
+            >
+              <option value="shorts">Shorts</option>
+              <option value="deeper">Deeper Clips</option>
+            </select>
             <label className="muted">Range</label>
             <input
               type="number"
@@ -268,9 +401,9 @@ export function SermonDetail({ sermon, admin, onBack, onTrim, onDeleted }: Props
                 className="secondary"
                 onClick={onSelectClips}
                 disabled={runningKinds.has('select_clips')}
-                title="Re-run Claude clip selection with the range above"
+                title="Re-run Claude clip selection with the mode and range above"
               >
-                {runningKinds.has('select_clips') ? 'Re-running…' : 'Re-run'}
+                {runningKinds.has('select_clips') ? 'Re-running…' : `Re-run ${selectionMode === 'deeper' ? 'Deeper Clips' : 'Shorts'}`}
               </button>
               <JobProgress job={selectJob} />
             </>
@@ -280,7 +413,7 @@ export function SermonDetail({ sermon, admin, onBack, onTrim, onDeleted }: Props
                 onClick={onSelectClips}
                 disabled={!sermon.transcribed || runningKinds.has('select_clips')}
               >
-                {runningKinds.has('select_clips') ? 'Running…' : 'Run clip selection'}
+                {runningKinds.has('select_clips') ? 'Running…' : `Run ${selectionMode === 'deeper' ? 'Deeper Clips' : 'clip selection'}`}
               </button>
               {!sermon.transcribed && <span className="muted">(transcribe first)</span>}
               <JobProgress job={selectJob} />
@@ -300,7 +433,10 @@ export function SermonDetail({ sermon, admin, onBack, onTrim, onDeleted }: Props
 
       {clips && (
         <section className="clips">
-          <h2>Suggested clips</h2>
+          <h2>{clips.selection_mode === 'deeper' ? 'Suggested Deeper Clips' : 'Suggested clips'}</h2>
+          {clips.selection_mode === 'deeper' && (
+            <p className="muted small">Longer midweek excerpts chosen from the whole sermon, not from the existing Shorts pool.</p>
+          )}
           <ul>
             {clips.clips
               .map((clip, i) => ({ clip, i }))
@@ -347,10 +483,11 @@ export function SermonDetail({ sermon, admin, onBack, onTrim, onDeleted }: Props
                     </div>
                   )}
                   <div className="clip-actions">
-                    <button onClick={() => onTrim(clip, i)}>
+                    <button onClick={() => onTrim(clip, i, clips.selection_mode ?? selectionMode)}>
                       {clip.exported ? 'Re-trim & export' : 'Preview / trim / export'}
                     </button>
                   </div>
+                  <ClipSocialSummary posts={postsByClip[i] ?? []} />
                 </li>
               )
             })}

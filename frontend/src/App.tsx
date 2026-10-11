@@ -5,7 +5,9 @@ import { SermonDetail } from './views/SermonDetail'
 import { Trim } from './views/Trim'
 import { AdminControls } from './views/AdminControls'
 import { History } from './views/History'
+import { Reporting } from './views/Reporting'
 import { Settings } from './views/Settings'
+import { YouTubeBackfill } from './views/YouTubeBackfill'
 import { Usage } from './views/Usage'
 import type { Clip, Me, Sermon } from './types'
 import logo from './assets/connectclips-banner.png'
@@ -13,21 +15,25 @@ import './App.css'
 
 type View =
   | { name: 'list' }
-  | { name: 'detail'; sermon: Sermon }
-  | { name: 'trim'; sermon: Sermon; clip: Clip; clipIndex: number }
+  | { name: 'detail'; sermon: Sermon; selectionMode?: 'shorts' | 'deeper' }
+  | { name: 'trim'; sermon: Sermon; clip: Clip; clipIndex: number; selectionMode?: 'shorts' | 'deeper' }
   | { name: 'history' }
   | { name: 'usage' }
   | { name: 'settings' }
+  | { name: 'reporting' }
+  | { name: 'youtube-backfill' }
 
 // Parsed-from-URL form. Doesn't carry the full sermon/clip object — those
 // come from the API on hydration.
 type Route =
   | { name: 'list' }
-  | { name: 'detail'; sermonName: string }
-  | { name: 'trim'; sermonName: string; clipIndex: number }
+  | { name: 'detail'; sermonName: string; selectionMode?: 'shorts' | 'deeper' }
+  | { name: 'trim'; sermonName: string; clipIndex: number; selectionMode?: 'shorts' | 'deeper' }
   | { name: 'history' }
   | { name: 'usage' }
   | { name: 'settings' }
+  | { name: 'reporting' }
+  | { name: 'youtube-backfill' }
 
 type Upload = {
   id: string  // client-side; lets the banner key by uploads even if the file
@@ -53,8 +59,10 @@ function buildPath(view: View): string {
     case 'history':  return '/history'
     case 'usage':    return '/usage'
     case 'settings': return '/settings'
-    case 'detail':   return `/sermons/${encodeURIComponent(view.sermon.name)}`
-    case 'trim':     return `/sermons/${encodeURIComponent(view.sermon.name)}/clip/${view.clipIndex}`
+    case 'reporting': return '/reporting'
+    case 'youtube-backfill': return '/reporting/youtube-backfill'
+    case 'detail':   return `/sermons/${encodeURIComponent(view.sermon.name)}${view.selectionMode === 'deeper' ? '?mode=deeper' : ''}`
+    case 'trim':     return `/sermons/${encodeURIComponent(view.sermon.name)}/clip/${view.clipIndex}${view.selectionMode === 'deeper' ? '?mode=deeper' : ''}`
   }
 }
 
@@ -63,13 +71,15 @@ function parsePath(pathname: string): Route {
   if (pathname === '/history') return { name: 'history' }
   if (pathname === '/usage') return { name: 'usage' }
   if (pathname === '/settings') return { name: 'settings' }
+  if (pathname === '/reporting') return { name: 'reporting' }
+  if (pathname === '/reporting/youtube-backfill') return { name: 'youtube-backfill' }
   const trim = pathname.match(/^\/sermons\/([^/]+)\/clip\/(\d+)\/?$/)
   if (trim) {
-    return { name: 'trim', sermonName: decodeURIComponent(trim[1]), clipIndex: parseInt(trim[2], 10) }
+    return { name: 'trim', sermonName: decodeURIComponent(trim[1]), clipIndex: parseInt(trim[2], 10), selectionMode: new URLSearchParams(window.location.search).get('mode') === 'deeper' ? 'deeper' : 'shorts' }
   }
   const detail = pathname.match(/^\/sermons\/([^/]+)\/?$/)
   if (detail) {
-    return { name: 'detail', sermonName: decodeURIComponent(detail[1]) }
+    return { name: 'detail', sermonName: decodeURIComponent(detail[1]), selectionMode: new URLSearchParams(window.location.search).get('mode') === 'deeper' ? 'deeper' : 'shorts' }
   }
   return { name: 'list' }
 }
@@ -82,6 +92,8 @@ function routeMatchesView(route: Route, view: View): boolean {
   if (route.name === 'history' && view.name === 'history') return true
   if (route.name === 'usage' && view.name === 'usage') return true
   if (route.name === 'settings' && view.name === 'settings') return true
+  if (route.name === 'reporting' && view.name === 'reporting') return true
+  if (route.name === 'youtube-backfill' && view.name === 'youtube-backfill') return true
   if (route.name === 'detail' && view.name === 'detail') {
     return route.sermonName === view.sermon.name
   }
@@ -124,6 +136,8 @@ function App() {
     if (route.name === 'history')  return { name: 'history' }
     if (route.name === 'usage')    return { name: 'usage' }
     if (route.name === 'settings') return { name: 'settings' }
+    if (route.name === 'reporting') return { name: 'reporting' }
+    if (route.name === 'youtube-backfill') return { name: 'youtube-backfill' }
 
     const sermons = await api.listSermons()
     const sermon = sermons.find((s) => s.name === route.sermonName)
@@ -131,17 +145,17 @@ function App() {
       throw new Error(`Sermon not found: ${route.sermonName}`)
     }
     if (route.name === 'detail') {
-      return { name: 'detail', sermon }
+      return { name: 'detail', sermon, selectionMode: route.selectionMode ?? 'shorts' }
     }
     // trim
-    const clipsFile = await api.getClips(sermon.name)
+    const clipsFile = await api.getClips(sermon.name, route.selectionMode ?? 'shorts')
     const clip = clipsFile.clips[route.clipIndex]
     if (!clip) {
       // Clip index out of range — clips.json was regenerated since the URL
       // was bookmarked. Drop to the sermon detail so the user can pick again.
-      return { name: 'detail', sermon }
+      return { name: 'detail', sermon, selectionMode: route.selectionMode ?? 'shorts' }
     }
-    return { name: 'trim', sermon, clip, clipIndex: route.clipIndex }
+    return { name: 'trim', sermon, clip, clipIndex: route.clipIndex, selectionMode: route.selectionMode ?? 'shorts' }
   }, [])
 
   // Mount: read URL, hydrate. Subscribe to popstate so the browser
@@ -300,6 +314,16 @@ function App() {
             </div>
           )}
           {/* History: admin-only — shows last 200 actions across all users */}
+          {view.name !== 'reporting' && (
+            <button className="secondary" onClick={() => navigate({ name: 'reporting' })}>
+              Reporting
+            </button>
+          )}
+          {me.admin && view.name !== 'youtube-backfill' && (
+            <button className="secondary" onClick={() => navigate({ name: 'youtube-backfill' })}>
+              YouTube Backfill
+            </button>
+          )}
           {me.admin && view.name !== 'history' && (
             <button className="secondary" onClick={() => navigate({ name: 'history' })}>
               Activity
@@ -364,7 +388,7 @@ function App() {
               <SermonList
                 key={listVersion}
                 admin={me.admin}
-                onOpen={(s) => navigate({ name: 'detail', sermon: s })}
+                onOpen={(s, selectionMode = 'shorts') => navigate({ name: 'detail', sermon: s, selectionMode })}
                 onDeleted={() => setListVersion((v) => v + 1)}
                 onUpload={startUpload}
                 uploadActive={uploads.some((u) => u.status === 'uploading')}
@@ -375,9 +399,17 @@ function App() {
                 sermon={view.sermon}
                 admin={me.admin}
                 onBack={() => navigate({ name: 'list' })}
-                onTrim={(clip, clipIndex) =>
-                  navigate({ name: 'trim', sermon: view.sermon, clip, clipIndex })
-                }
+                initialSelectionMode={view.selectionMode ?? 'shorts'}
+                onTrim={(clip, clipIndex, selectionMode) => {
+                  // Preserve the selected clip set in the browser-history entry
+                  // we are leaving. Otherwise the browser Back button returns
+                  // to /sermons/:name with no mode query, and SermonDetail
+                  // defaults back to Shorts even though the user came from
+                  // Deeper Clips.
+                  const detailPath = `/sermons/${encodeURIComponent(view.sermon.name)}${selectionMode === 'deeper' ? '?mode=deeper' : ''}`
+                  window.history.replaceState(null, '', detailPath)
+                  navigate({ name: 'trim', sermon: view.sermon, clip, clipIndex, selectionMode })
+                }}
                 onDeleted={() => {
                   setListVersion((v) => v + 1)
                   navigate({ name: 'list' })
@@ -389,11 +421,21 @@ function App() {
                 sermon={view.sermon}
                 clip={view.clip}
                 clipIndex={view.clipIndex}
+              selectionMode={view.selectionMode ?? 'shorts'}
                 onBack={async () => {
                   const updated = await refreshSermon(view.sermon.name)
-                  navigate({ name: 'detail', sermon: updated ?? view.sermon })
+                  navigate({ name: 'detail', sermon: updated ?? view.sermon, selectionMode: view.selectionMode ?? 'shorts' })
                 }}
               />
+            )}
+            {view.name === 'reporting' && (
+              <Reporting
+                admin={me.admin}
+                onBack={() => navigate({ name: 'list' })}
+              />
+            )}
+            {view.name === 'youtube-backfill' && (
+              <YouTubeBackfill onBack={() => navigate({ name: 'reporting' })} />
             )}
             {view.name === 'history' && (
               <History onBack={() => navigate({ name: 'list' })} />

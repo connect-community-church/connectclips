@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
-import type { Sermon } from '../types'
+import type { ClipSelectionMode, Sermon } from '../types'
 import { AddSermon } from './AddSermon'
 
 type Props = {
   admin: boolean
-  onOpen: (sermon: Sermon) => void
+  onOpen: (sermon: Sermon, selectionMode?: ClipSelectionMode) => void
   onDeleted: () => void
   onUpload: (file: File) => void
   uploadActive: boolean
@@ -73,6 +73,11 @@ export function SermonList({ admin, onOpen, onDeleted, onUpload, uploadActive }:
     refresh()
   }, [refresh])
 
+  const openMode = (e: React.MouseEvent, sermon: Sermon, selectionMode: ClipSelectionMode) => {
+    e.stopPropagation()
+    onOpen(sermon, selectionMode)
+  }
+
   const onDelete = async (e: React.MouseEvent, name: string) => {
     e.stopPropagation()
     if (!window.confirm(`Delete "${name}"?\n\nThis removes the source file, transcript, clips.json, and every exported MP4.`)) return
@@ -117,7 +122,7 @@ export function SermonList({ admin, onOpen, onDeleted, onUpload, uploadActive }:
           </div>
           <ul>
             {sortedSermons.map((s) => (
-            <li key={s.name} className="sermon-row" onClick={() => onOpen(s)}>
+            <li key={s.name} className="sermon-row" onClick={() => onOpen(s, 'shorts')}>
               <div className="name">{s.name}</div>
               <div className="meta">
                 {formatSize(s.size_bytes)} · {new Date(s.modified_at).toLocaleString()}
@@ -130,8 +135,17 @@ export function SermonList({ admin, onOpen, onDeleted, onUpload, uploadActive }:
                   {s.clips_selected ? `✓ ${s.n_clips} clips` : 'no clips yet'}
                 </span>
               </div>
-              {admin && (
-                <div className="row-actions">
+              <div className="row-actions">
+                {s.clips_selected && (
+                  <button
+                    className="secondary"
+                    onClick={(e) => openMode(e, s, 'deeper')}
+                    title="Open this sermon directly in Deeper Clips mode"
+                  >
+                    Deeper Clips
+                  </button>
+                )}
+                {admin && (
                   <button
                     className="danger"
                     onClick={(e) => onDelete(e, s.name)}
@@ -139,8 +153,8 @@ export function SermonList({ admin, onOpen, onDeleted, onUpload, uploadActive }:
                   >
                     {deleting === s.name ? 'Deleting…' : 'Delete'}
                   </button>
-                </div>
-              )}
+                )}
+              </div>
             </li>
             ))}
           </ul>

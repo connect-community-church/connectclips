@@ -32,6 +32,7 @@ class SelectClipsRequest(BaseModel):
     source: str
     num_clips_min: int = 3
     num_clips_max: int = 8
+    selection_mode: str = "shorts"
 
 
 @router.post("/select-clips", status_code=201)
@@ -40,6 +41,7 @@ async def create_select_clips_job(body: SelectClipsRequest, request: Request) ->
     try:
         job = jobs.create_select_clips_job(
             body.source, body.num_clips_min, body.num_clips_max,
+            selection_mode=body.selection_mode,
             user_login=u.login, user_name=u.name,
         )
     except FileNotFoundError as exc:
@@ -60,6 +62,10 @@ class ExportClipRequest(BaseModel):
     identity_id: int | None = None
     zoom_level: str | None = None
     lock_camera: bool = False
+    # Ordered identity ids for split-screen. 2+ entries => stacked panels;
+    # otherwise ignored and identity_id drives the single-speaker crop.
+    panels: list[int] | None = None
+    selection_mode: str = "shorts"
 
 
 @router.post("/export-clip", status_code=201)
@@ -68,6 +74,7 @@ async def create_export_clip_job(body: ExportClipRequest, request: Request) -> d
     try:
         job = jobs.create_export_clip_job(
             body.source, body.clip_index,
+            selection_mode=body.selection_mode,
             start_override=body.start_override,
             end_override=body.end_override,
             caption_style=body.caption_style,
@@ -76,6 +83,7 @@ async def create_export_clip_job(body: ExportClipRequest, request: Request) -> d
             identity_id=body.identity_id,
             zoom_level=body.zoom_level,
             lock_camera=body.lock_camera,
+            panels=body.panels,
             user_login=u.login, user_name=u.name,
         )
     except FileNotFoundError as exc:
