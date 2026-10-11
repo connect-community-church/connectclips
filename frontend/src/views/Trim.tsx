@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, fileUrl } from '../api'
-import type { Clip, Identity, Job, Sermon, ZoomLevel } from '../types'
+import type { Clip, ClipSelectionMode, Identity, Job, Sermon, ZoomLevel } from '../types'
 import { Publish } from './Publish'
 import { CaptionStylePicker } from './CaptionStylePicker'
 import { LivePreview } from './LivePreview'
@@ -9,6 +9,7 @@ type Props = {
   sermon: Sermon
   clip: Clip
   clipIndex: number
+  selectionMode?: ClipSelectionMode
   onBack: () => void
 }
 
@@ -58,7 +59,7 @@ function parseTime(input: string): number | null {
   return mins * 60 + secs + sub
 }
 
-export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
+export function Trim({ sermon, clip, clipIndex, selectionMode = 'shorts', onBack }: Props) {
   // clip.start / clip.end already have any saved start/end override applied
   // by the backend. The other override fields live in clip.user_edits.
   const userEdits = clip.user_edits ?? {}
@@ -93,12 +94,21 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
   )
   const [identities, setIdentities] = useState<Identity[]>([])
   const [identityScanned, setIdentityScanned] = useState(false)
-  // null = "auto" (highest-score live face per sample). Set to an id when the
-  // volunteer picks a specific face from the strip; the picker only shows up
-  // if the scan found more than one identity.
-  const [identityId, setIdentityId] = useState<number | null>(
-    userEdits.identity_id ?? null,
-  )
+  // Ordered list of picked speaker identities. Empty = "Auto" (highest-score
+  // live face per sample). One = single-speaker follow of that face. Two+ =
+  // split-screen, stacked in this order. We derive identityId / panels below
+  // so the single-speaker export path stays exactly as it was.
+  const [selected, setSelected] = useState<number[]>(() => {
+    if (userEdits.panels && userEdits.panels.length >= 2) return userEdits.panels
+    if (userEdits.identity_id != null) return [userEdits.identity_id]
+    return []
+  })
+  // Cap the split at 3 speakers — beyond that each stacked band is too short
+  // to read. The backend can composite more, but the UI holds the line here.
+  const MAX_PANELS = 3
+  const splitMode = selected.length >= 2
+  const identityId = selected.length === 1 ? selected[0] : null
+  const panels = splitMode ? selected : null
   // Zoom preset drives how much background sits around the pastor face. The
   // backend stays the source of truth for the multiplier values (3.6 / 5.0 /
   // 7.0). "medium" is the default the backend would otherwise pick on its
@@ -171,7 +181,14 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
   const setStyleKeyU: typeof setStyleKey = (v) => { setStyleKey(v); markDirty() }
   const setIncludeHookTitleU: typeof setIncludeHookTitle = (v) => { setIncludeHookTitle(v); markDirty() }
   const setCaptionMarginVU: typeof setCaptionMarginV = (v) => { setCaptionMarginV(v); markDirty() }
-  const setIdentityIdU: typeof setIdentityId = (v) => { setIdentityId(v); markDirty() }
+  const setSelectedU = (v: number[]) => { setSelected(v); markDirty() }
+  // Toggle a face in/out of the ordered selection. Adding appends (so the
+  // panel order follows click order); removing renumbers the rest. Ignores
+  // clicks past MAX_PANELS so the split can't grow unreadable.
+  const toggleFace = (id: number) => {
+    if (selected.includes(id)) setSelectedU(selected.filter((x) => x !== id))
+    else if (selected.length < MAX_PANELS) setSelectedU([...selected, id])
+  }
   const setZoomLevelU: typeof setZoomLevel = (v) => { setZoomLevel(v); markDirty() }
   const setLockCameraU: typeof setLockCamera = (v) => { setLockCamera(v); markDirty() }
 
@@ -193,6 +210,9 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
         include_hook_title: includeHookTitle,
         caption_margin_v: captionMarginV,
         identity_id: identityId,
+        // 2+ picked speakers persist as `panels`; 0/1 leave it null so the
+        // single-speaker identity_id path stays the source of truth.
+        panels: splitMode ? selected : null,
         // Saving "medium" would be harmless (the backend treats it the same
         // as no override) but writing null keeps the stored override file
         // small and makes the Reset-to-suggestion gate honest.
@@ -208,7 +228,7 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
     return () => clearTimeout(t)
   }, [
     sermon.name, clipIndex,
-    start, end, styleKey, includeHookTitle, captionMarginV, identityId, zoomLevel,
+    start, end, styleKey, includeHookTitle, captionMarginV, selected, zoomLevel,
     lockCamera,
   ])
 
@@ -219,6 +239,101 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
       v.currentTime = clip.start
     }
   }, [clip.start])
+
+  // Mouse-wheel scrub on the source video. Resolve-style modifiers: default
+  // fine, Shift = coarse, Alt = single frame. Attached as a native listener
+  // with passive:false so preventDefault() can stop the page from scrolling
+  // (React's synthetic onWheel is passive and won't allow it).
+  //
+  // Scrub-audio: each wheel event keeps the video playing for a short burst,
+  // and a rolling timer pauses it shortly after the last scroll. Continuous
+  // scrolling → continuous audio so the user can hear phrase boundaries;
+  // stopping → silence within ~200ms.
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v) return
+    const SCRUB_FINE = 0.1
+    const SCRUB_COARSE = 1.0
+    const SCRUB_FRAME = 1 / 24
+    // Has to be long enough for the seek to land AND the audio decoder to
+    // start emitting samples; otherwise pause() interrupts play() before
+    // any sound reaches the speakers. 400ms is safe in Chromium/Firefox.
+    const SCRUB_AUDIO_MS = 400
+    let pauseTimer: ReturnType<typeof setTimeout> | null = null
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      setLooping(false)
+      const step = e.altKey ? SCRUB_FRAME : e.shiftKey ? SCRUB_COARSE : SCRUB_FINE
+      const dir = e.deltaY > 0 ? 1 : -1
+      const dur = isFinite(v.duration) ? v.duration : Infinity
+      v.currentTime = Math.max(0, Math.min(dur, v.currentTime + dir * step))
+      // Defensive unmute: if the user toggled mute via the controls earlier
+      // (or the browser tab is muted via its own UI we can't see here), we
+      // can at least clear the element-level mute. If volume is 0 nudge it
+      // up so they hear something -- they can still re-set it after.
+      if (v.muted) v.muted = false
+      if (v.volume === 0) v.volume = 1
+      if (v.paused) {
+        // Wheel is a user gesture so autoplay policy lets this through.
+        const p = v.play()
+        if (p && typeof p.catch === 'function') {
+          p.catch((err) => {
+            // "The play() request was interrupted by a call to pause()" is
+            // harmless and expected when the next wheel event fires before
+            // this play resolves. Anything else is worth seeing.
+            if (!String(err).includes('interrupted')) {
+              console.warn('scrub play() rejected:', err)
+            }
+          })
+        }
+      }
+      if (pauseTimer) clearTimeout(pauseTimer)
+      pauseTimer = setTimeout(() => {
+        v.pause()
+        pauseTimer = null
+      }, SCRUB_AUDIO_MS)
+    }
+    v.addEventListener('wheel', onWheel, { passive: false })
+    return () => {
+      v.removeEventListener('wheel', onWheel)
+      if (pauseTimer) clearTimeout(pauseTimer)
+    }
+  }, [])
+
+  // I / O set in / out points from the current playhead (DaVinci Resolve
+  // shortcut). Active anywhere on the Trim view but ignored while typing
+  // in a text input so editing the M:SS.cc fields still works. Clamps so
+  // start < end with the same 0.1s gap the nudge buttons use.
+  //
+  // Capture phase: a focused <video controls> element swallows certain
+  // keystrokes before they bubble to window. Listening in capture phase
+  // sees the event before any descendant target gets it, so the shortcut
+  // works whether the video, the page, or a button has focus.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tgt = e.target as HTMLElement | null
+      if (tgt) {
+        const tag = tgt.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tgt.isContentEditable) return
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const v = videoRef.current
+      if (!v) return
+      if (e.key === 'i' || e.key === 'I') {
+        e.preventDefault()
+        const t = parseFloat(v.currentTime.toFixed(2))
+        console.log('[trim] I → start =', t)
+        setStartU(Math.min(t, end - 0.1))
+      } else if (e.key === 'o' || e.key === 'O') {
+        e.preventDefault()
+        const t = parseFloat(v.currentTime.toFixed(2))
+        console.log('[trim] O → end =', t)
+        setEndU(Math.max(t, start + 0.1))
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [start, end])
 
   // Keep the M:SS.cc text in sync with numeric state for any change that
   // doesn't originate from the input itself (nudge buttons, ⤓ playhead,
@@ -305,6 +420,8 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
         captionMarginV, identityId,
         zoomLevel === 'medium' ? null : zoomLevel,
         lockCamera,
+        panels,
+        selectionMode,
       )
       setExportJob(j)
     } catch (e) {
@@ -330,7 +447,7 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
     setStyleKey(defaultStyleKey)
     setIncludeHookTitle(true)
     setCaptionMarginV(null)
-    setIdentityId(null)
+    setSelected([])
     setZoomLevel('medium')
     setLockCamera(false)
   }
@@ -412,7 +529,9 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
 
       <div className="player-row">
         <div className="player">
-          <div className="muted">Source video — scrub to find frame, then set in / out</div>
+          <div className="muted small">
+            Wheel = scrub · Shift+wheel = ±1s · Alt+wheel = frame · I / O = set in / out
+          </div>
           <video
             ref={videoRef}
             src={fileUrl.source(sermon.name)}
@@ -494,7 +613,7 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
                 styleKey !== defaultStyleKey ||
                 !includeHookTitle ||
                 captionMarginV !== null ||
-                identityId !== null ||
+                selected.length > 0 ||
                 zoomLevel !== 'medium' ||
                 lockCamera
               ) && (
@@ -534,6 +653,7 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
             identityId={identityId}
             zoomLevel={zoomLevel}
             lockCamera={lockCamera}
+            panels={panels}
           />
 
           <div className="zoom-picker">
@@ -575,28 +695,47 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
 
           {showFacePicker && (
             <div className="face-picker">
-              <div className="muted small">Track which face?</div>
+              <div className="muted small">
+                {splitMode
+                  ? `Split screen · ${selected.length} speakers stacked in this order`
+                  : 'Track which face?'}
+              </div>
+              <div className="muted small">
+                Click a face to follow it. Click a second (or third) to split the
+                screen between them, top-to-bottom in click order. Click again to remove.
+              </div>
               <div className="face-picker-row">
                 <button
-                  className={`face-thumb auto ${identityId === null ? 'selected' : ''}`}
-                  onClick={() => setIdentityIdU(null)}
+                  className={`face-thumb auto ${selected.length === 0 ? 'selected' : ''}`}
+                  onClick={() => setSelectedU([])}
                   title="Auto: follow the most prominent face per moment"
                 >
                   Auto
                 </button>
-                {significantIdentities.map((id) => (
-                  <button
-                    key={id.id}
-                    className={`face-thumb ${identityId === id.id ? 'selected' : ''}`}
-                    onClick={() => setIdentityIdU(id.id)}
-                    title={`Identity ${id.id} · ${id.n_samples} samples`}
-                  >
-                    <img
-                      src={fileUrl.identityThumb(sermon.name, id.id)}
-                      alt={`Face ${id.id}`}
-                    />
-                  </button>
-                ))}
+                {significantIdentities.map((id) => {
+                  const order = selected.indexOf(id.id)
+                  const isSel = order >= 0
+                  const atCap = !isSel && selected.length >= MAX_PANELS
+                  return (
+                    <button
+                      key={id.id}
+                      className={`face-thumb ${isSel ? 'selected' : ''}`}
+                      onClick={() => toggleFace(id.id)}
+                      disabled={atCap}
+                      title={
+                        atCap
+                          ? `Up to ${MAX_PANELS} speakers in a split`
+                          : `Identity ${id.id} · ${id.n_samples} samples`
+                      }
+                    >
+                      <img
+                        src={fileUrl.identityThumb(sermon.name, id.id)}
+                        alt={`Face ${id.id}`}
+                      />
+                      {isSel && <span className="face-badge">{order + 1}</span>}
+                    </button>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -639,6 +778,7 @@ export function Trim({ sermon, clip, clipIndex, onBack }: Props) {
             <Publish
               sermon={sermon}
               clip={clip}
+              clipIndex={clipIndex}
               exportedFilename={currentExportedFilename}
             />
           )}

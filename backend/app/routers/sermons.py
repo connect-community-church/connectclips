@@ -97,6 +97,32 @@ def get_clip_track(
     )
 
 
+@router.get("/{name}/clip-tracks")
+def get_clip_tracks(
+    name: str, start: float, end: float, panels: str,
+    zoom_level: str | None = None,
+    lock_camera: bool = False,
+) -> dict:
+    """Per-panel crop tracks for the split-screen preview. ``panels`` is a
+    comma-separated list of identity ids (2+), ordered top-to-bottom. Returns
+    one track per panel plus its band height, so the preview canvas can draw
+    the stacked composite the export will produce."""
+    src = settings.data_sources_dir / name
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail=f"sermon not found: {name}")
+    if end <= start:
+        raise HTTPException(status_code=400, detail="end must be greater than start")
+    try:
+        ids = [int(p) for p in panels.split(",") if p.strip() != ""]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="panels must be comma-separated integers")
+    if len(ids) < 2:
+        raise HTTPException(status_code=400, detail="split preview needs at least 2 panels")
+    return reframe.tracks_for_clip(
+        src, start, end, ids, zoom_level=zoom_level, lock_camera=lock_camera,
+    )
+
+
 @router.get("/{name}/identities")
 def get_identities(name: str) -> dict:
     """List identities tracked across this sermon's source. Returns an empty
@@ -163,8 +189,8 @@ def get_transcript_words(name: str, start: float = 0.0, end: float | None = None
 
 
 @router.get("/{name}/clips")
-def get_clips(name: str) -> dict:
-    clips_path = clip_selection.clips_path_for(name)
+def get_clips(name: str, selection_mode: str = "shorts") -> dict:
+    clips_path = clip_selection.clips_path_for(name, selection_mode)
     if not clips_path.exists():
         raise HTTPException(status_code=404, detail="clips.json not found (run select-clips first)")
     data = json.loads(clips_path.read_text())
@@ -223,6 +249,9 @@ class ClipOverridesIn(BaseModel):
     identity_id: int | None = None
     zoom_level: str | None = None
     lock_camera: bool | None = None
+    # Ordered identity ids for split-screen (2+ = stacked panels). null / <2
+    # entries means no split — the identity_id field drives single-speaker crop.
+    panels: list[int] | None = None
 
 
 @router.put("/{name}/clips/{clip_index}/overrides")
@@ -234,6 +263,7 @@ def put_clip_overrides(name: str, clip_index: int, body: ClipOverridesIn) -> dic
     Trim page calls this debounced as the volunteer changes start /
     end / caption style / etc.
     """
+    selection_mode = getattr(body, "selection_mode", "shorts") if False else "shorts"
     clips_path = clip_selection.clips_path_for(name)
     if not clips_path.exists():
         raise HTTPException(status_code=404, detail="clips.json not found")

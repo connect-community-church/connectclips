@@ -1,4 +1,4 @@
-import type { AppSettings, ClipsFile, ClipUserEdits, IdentitiesResponse, Job, Me, Sermon, Track, TranscriptWord, UsageResponse } from './types'
+import type { AppSettings, ClipsFile, ClipTracks, ClipUserEdits, IdentitiesResponse, Job, Me, ReportingSummary, Sermon, SocialPost, Track, TranscriptWord, UsageResponse, YouTubeBackfillQueue } from './types'
 
 async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`/api${path}`, {
@@ -26,7 +26,8 @@ export const api = {
   health: () => jsonFetch<{ status: string }>('/health'),
 
   listSermons: () => jsonFetch<Sermon[]>('/sermons'),
-  getClips: (name: string) => jsonFetch<ClipsFile>(`/sermons/${encodeURIComponent(name)}/clips`),
+  getClips: (name: string, selection_mode: 'shorts' | 'deeper' = 'shorts') =>
+    jsonFetch<ClipsFile>(`/sermons/${encodeURIComponent(name)}/clips?selection_mode=${selection_mode}`),
 
   listJobs: (limit = 200) => jsonFetch<Job[]>(`/jobs?limit=${limit}`),
   getJob: (id: string) => jsonFetch<Job>(`/jobs/${id}`),
@@ -43,10 +44,10 @@ export const api = {
 
   startTranscribe: (source: string) =>
     jsonFetch<Job>('/jobs', { method: 'POST', body: JSON.stringify({ source }) }),
-  startSelectClips: (source: string, num_clips_min?: number, num_clips_max?: number) =>
+  startSelectClips: (source: string, num_clips_min?: number, num_clips_max?: number, selection_mode: 'shorts' | 'deeper' = 'shorts') =>
     jsonFetch<Job>('/jobs/select-clips', {
       method: 'POST',
-      body: JSON.stringify({ source, num_clips_min, num_clips_max }),
+      body: JSON.stringify({ source, num_clips_min, num_clips_max, selection_mode }),
     }),
   startExportClip: (
     source: string,
@@ -59,13 +60,15 @@ export const api = {
     identity_id?: number | null,
     zoom_level?: string | null,
     lock_camera?: boolean,
+    panels?: number[] | null,
+    selection_mode: 'shorts' | 'deeper' = 'shorts',
   ) =>
     jsonFetch<Job>('/jobs/export-clip', {
       method: 'POST',
       body: JSON.stringify({
         source, clip_index, start_override, end_override, caption_style,
         include_hook_title, caption_margin_v, identity_id, zoom_level,
-        lock_camera,
+        lock_camera, panels, selection_mode,
       }),
     }),
 
@@ -96,6 +99,22 @@ export const api = {
     const lc = lock_camera ? '&lock_camera=true' : ''
     return jsonFetch<Track>(
       `/sermons/${encodeURIComponent(source)}/clip-track?start=${start}&end=${end}${id}${zl}${lc}`,
+    )
+  },
+
+  // Split-screen preview: per-panel crop tracks for an ordered list of
+  // speaker identities (2+). Mirrors getClipTrack but returns one track per
+  // stacked panel so the preview canvas can draw the composite.
+  getClipTracks: (
+    source: string, start: number, end: number,
+    panels: number[],
+    zoom_level?: string | null,
+    lock_camera?: boolean,
+  ) => {
+    const zl = zoom_level == null ? '' : `&zoom_level=${encodeURIComponent(zoom_level)}`
+    const lc = lock_camera ? '&lock_camera=true' : ''
+    return jsonFetch<ClipTracks>(
+      `/sermons/${encodeURIComponent(source)}/clip-tracks?start=${start}&end=${end}&panels=${panels.join(',')}${zl}${lc}`,
     )
   },
 
@@ -178,6 +197,107 @@ export const api = {
       body: JSON.stringify({ password }),
     }),
   exitAdmin: () => jsonFetch<{ admin: boolean }>('/auth/admin/exit', { method: 'POST' }),
+
+
+  // Reporting
+  listPosts: (opts: { limit?: number; sermon_source?: string; clip_index?: number } = {}) => {
+    const q = new URLSearchParams()
+    q.set('limit', String(opts.limit ?? 500))
+    if (opts.sermon_source != null) q.set('sermon_source', opts.sermon_source)
+    if (opts.clip_index != null) q.set('clip_index', String(opts.clip_index))
+    return jsonFetch<{ posts: SocialPost[] }>('/reporting/posts?' + q.toString())
+  },
+  getReportingSummary: () =>
+    jsonFetch<ReportingSummary>('/reporting/summary'),
+  logPost: (body: {
+    sermon_source?: string | null
+    clip_index?: number | null
+    post_url?: string | null
+    posted_at?: string | null
+    title?: string | null
+  }) =>
+    jsonFetch<{ id: number; created_at: string }>('/reporting/posts', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  logMissingUrlAttempt: (body: {
+    sermon_source: string
+    clip_index: number
+    platform: string
+    title?: string | null
+  }) =>
+    jsonFetch<{ id: string; created_at: string }>('/reporting/missing-url-attempt', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  refreshPost: (id: number) =>
+    jsonFetch<{
+      id: number
+      post_id: number
+      snapshot_at: string
+      post_url: string
+      stats: { views: number | null; likes: number | null; shares: number | null; comments: number | null }
+    }>('/reporting/posts/' + id + '/refresh', { method: 'POST' }),
+  deletePost: (id: number) =>
+    jsonFetch<{ id: number; deleted: boolean }>('/reporting/posts/' + id, { method: 'DELETE' }),
+  logMetrics: (
+    postId: number,
+    body: { views?: number | null; likes?: number | null; shares?: number | null; comments?: number | null; snapshot_at?: string | null },
+  ) =>
+    jsonFetch<{ id: number; post_id: number; snapshot_at: string }>(
+      '/reporting/posts/' + postId + '/metrics',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  importPostsCSV: async (file: File): Promise<{ imported: number; errors: string[] }> => {
+    const fd = new FormData()
+    fd.append('file', file)
+    const r = await fetch('/api/reporting/import', { method: 'POST', body: fd, credentials: 'include' })
+    if (!r.ok) {
+      let detail = r.status + ' ' + r.statusText
+      try { const b = await r.json(); if (b?.detail) detail = b.detail } catch {}
+      throw new Error(detail)
+    }
+    return r.json()
+  },
+
+  youtubeStatus: () =>
+    jsonFetch<{
+      connected: boolean
+      channel_id?: string | null
+      channel_title?: string | null
+      connected_by?: string | null
+      connected_at?: string | null
+    }>('/auth/youtube/status'),
+  authorizeYoutube: () =>
+    jsonFetch<{ url: string }>('/auth/youtube/authorize'),
+  disconnectYoutube: () =>
+    jsonFetch<{ connected: boolean }>('/auth/youtube/disconnect', { method: 'POST' }),
+  publishYoutube: (body: {
+    sermon_source: string
+    clip_index: number
+    filename: string
+    title: string
+    description?: string
+    privacy_status?: 'public' | 'unlisted' | 'private'
+  }) =>
+    jsonFetch<{ id: number; video_id: string; post_url: string; created_at: string }>(
+      '/publish/youtube',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+
+
+  getYoutubeBackfillQueue: () =>
+    jsonFetch<YouTubeBackfillQueue>('/reporting/youtube-backfill'),
+  approveYoutubeBackfill: (videoId: string, body: { sermon_source: string; clip_index: number }) =>
+    jsonFetch<{ video_id: string; post_id: number | null; already_tracked?: boolean }>(
+      `/reporting/youtube-backfill/${encodeURIComponent(videoId)}/approve`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  denyYoutubeBackfill: (videoId: string) =>
+    jsonFetch<{ video_id: string; decision: string }>(
+      `/reporting/youtube-backfill/${encodeURIComponent(videoId)}/deny`,
+      { method: 'POST' },
+    ),
 
   deleteSermon: (name: string) =>
     jsonFetch<{ name: string; removed: string[]; removed_count: number }>(

@@ -91,9 +91,17 @@ def _get_client() -> Anthropic:
     return _client
 
 
-SYSTEM_PROMPT = """You are an editor for a church's social media team. The clips you pick are for OUTREACH: they will be seen by strangers scrolling TikTok / Reels / Shorts who have never been to this church and don't know the speaker. Your job is to find moments from the sermon that will stop the scroll and make a cold viewer curious enough to keep watching.
+# The clip-selection system prompt is assembled from three parts so the two
+# strategies below can share the parts that must never drift:
+#   _INTRO      -- who this is for (outreach to cold scrollers). Shared.
+#   <guidance>  -- what makes a clip good. This is the ONLY part that differs
+#                  between "classic" and "performance".
+#   _MECHANICS  -- transcript format, the exact output fields, and the
+#                  hook-score rubric. Shared, so both strategies emit the same
+#                  ClipCandidate schema and score the same way.
+_INTRO = """You are an editor for a church's social media team. The clips you pick are for OUTREACH: they will be seen by strangers scrolling TikTok / Reels / Shorts who have never been to this church and don't know the speaker. Your job is to find moments from the sermon that will stop the scroll and make a cold viewer curious enough to keep watching."""
 
-A great clip:
+_CLASSIC_GUIDANCE = """A great clip:
 - Hooks in the first 3 seconds — striking claim, vivid image, sharp question, contrarian statement, or compelling story opener. NOT a slow build-up.
 - Is self-contained — the payoff is in the clip itself; no prior context needed.
 - Lands on a complete thought, not mid-sentence.
@@ -103,9 +111,48 @@ Avoid:
 - Long Bible reading without commentary.
 - Setup or transitional material that needs context to land.
 - Stories whose punchline only makes sense after several minutes.
-- Moments that require sermon context to resonate.
+- Moments that require sermon context to resonate."""
 
-The transcript is segment-level: each line is one chunk of speech with a start and end time in seconds, formatted as `[start-end] text`. When you pick a clip, snap start and end to segment boundaries from the transcript so the clip starts and ends on a natural pause.
+# Reporting-tuned guidance. Based on analysis of which uploaded Shorts actually
+# performed: clips that create immediate human tension out-perform safe
+# teaching summaries. Biases toward the proven patterns without chasing
+# outrage, and asks for a deliberately balanced mix so every clip doesn't feel
+# the same.
+_PERFORMANCE_GUIDANCE = """A great clip hooks in the first 3 seconds — the tension itself is in those seconds, not a set-up for it — is self-contained (payoff needs no prior context), lands on a complete thought, and runs 30 to 90 seconds.
+
+Past performance guidance:
+ConnectClips reporting shows stronger performance from clips that create immediate human tension. Prefer moments that fit one or more of these patterns:
+- A bold or contrarian — but truthful — claim that makes a viewer think, "Wait, what?"
+- Raw honesty about sin, suffering, doubt, prayer, family, marriage, money, church hurt, fear, guilt, or spiritual exhaustion.
+- A direct personal question that names a hidden struggle.
+- A vivid story or image with conflict visible in the first few seconds.
+- A practical relationship / family / work / life application of doctrine.
+- A tension-to-grace arc: conviction, discomfort, or fear that resolves in gospel hope.
+
+Do not chase outrage or cheap controversy. The tone must remain pastoral, truthful, and hopeful. But when choosing between a safe teaching summary and a sharper self-contained moment with emotional stakes, prefer the sharper moment.
+
+Score hooks HIGHER when:
+- the first 3 seconds contain the actual tension, not just set-up
+- the clip can be understood by a non-church viewer
+- the language is concrete, personal, and emotionally recognizable
+- the moment would still be interesting if the viewer knows nothing about the sermon series
+
+Score hooks LOWER when:
+- the opening sounds like mid-sermon connective tissue (starts with "and", "now", "so", or another mid-thought connector)
+- the clip mostly explains a Bible passage without a felt human problem
+- the payoff requires prior context
+- the title is stronger than the spoken opening
+- it is a safe devotional summary, or theologically correct but emotionally flat
+- there is a long explanation before the tension arrives
+
+Aim for a BALANCED set rather than variations on one moment. When deciding which candidates to include, prioritize in this order and scale the proportions to the number of clips requested:
+1. Proven-pattern clips — contrarian, raw, personal, urgent, or practical. These should be the largest share.
+2. A vivid story / image clip, if a strong one is present.
+3. A theologically rich clip ONLY if it carries a sharp human hook.
+4. One experimental clip — unusually memorable even if a little risky.
+(For example, for ~5 clips that's roughly 2 proven-pattern, 1 story, 1 rich-with-hook, 1 experimental.)"""
+
+_MECHANICS = """The transcript is segment-level: each line is one chunk of speech with a start and end time in seconds, formatted as `[start-end] text`. When you pick a clip, snap start and end to segment boundaries from the transcript so the clip starts and ends on a natural pause.
 
 For each clip return:
 - start: clip start time in seconds (a segment boundary)
@@ -125,6 +172,63 @@ Hook score rubric — use the full range, calibrate carefully:
 Most clips should fall in 60–85. Don't inflate scores — a clip the volunteer skips because the hook is weak should score below 60.
 """
 
+CLASSIC_SYSTEM_PROMPT = f"{_INTRO}\n\n{_CLASSIC_GUIDANCE}\n\n{_MECHANICS}"
+PERFORMANCE_SYSTEM_PROMPT = f"{_INTRO}\n\n{_PERFORMANCE_GUIDANCE}\n\n{_MECHANICS}"
+
+_DEEPER_GUIDANCE = """Deeper Clips mode is for one midweek bridge clip, not a normal Short. These clips are for viewers who were encouraged by a Short and may want a fuller taste of the message before watching the full sermon. Choose from the full sermon transcript, not from previously selected Shorts.
+
+A great Deeper Clip:
+- Runs 2:30 to 5:00.
+- Has a clear beginning, middle, and end.
+- Develops one meaningful sermon idea with enough context to stand alone.
+- Is understandable to someone who was not in the room and has not watched the sermon.
+- Starts with a human problem, question, tension, or image in the first few seconds.
+- Ends with hope, Jesus, or a practical next step rather than stopping mid-thought.
+
+Avoid:
+- Simply stitching several Short-style moments together.
+- Long Bible reading without enough explanation.
+- Sections that depend on earlier sermon context.
+- Pure setup that does not land before the clip ends.
+- Inside-baseball church announcements or transitions.
+
+The goal is not maximum scroll-stopping speed. The goal is a deeper, watchable midweek excerpt that helps someone take one step further into the message."""
+
+_DEEPER_MECHANICS = """The transcript is segment-level: each line is one chunk of speech with a start and end time in seconds, formatted as `[start-end] text`. When you pick a Deeper Clip, snap start and end to segment boundaries from the transcript so the clip starts and ends on a natural pause.
+
+For each clip return:
+- start: clip start time in seconds (a segment boundary)
+- end: clip end time in seconds (a segment boundary, 2:30 to 5:00 after start)
+- title: a clear 5–10 word title for the midweek clip
+- rationale: one sentence on why this section works as a deeper bridge from Short to full sermon
+- hook_score: integer 0–100, predicting how likely a viewer is to keep watching past the first 15 seconds
+- hook_rationale: one sentence describing what the opening says or does and why it invites a deeper watch
+
+Hook score rubric — use the full range, calibrate carefully:
+- 90–100: extraordinary opening plus a clearly complete mini-message. Reserve for genuinely standout excerpts.
+- 75–89: strong deeper clip with a clear human hook and satisfying development.
+- 60–74: useful midweek excerpt, but the opening or ending needs volunteer judgment.
+- 40–59: understandable, but too slow, too contextual, or not complete enough.
+- Below 40: do not recommend; it is mostly setup, context-dependent, or incomplete.
+
+Most Deeper Clips should fall in 60–85. Do not inflate scores.
+"""
+
+DEEPER_SYSTEM_PROMPT = f"""{_INTRO}
+
+Deeper Clips
+
+{_DEEPER_GUIDANCE}
+
+{_DEEPER_MECHANICS}"""
+
+# Strategy key (from app_settings) -> system prompt. Unknown keys fall back to
+# the performance prompt in select_clips().
+SYSTEM_PROMPTS = {
+    "classic": CLASSIC_SYSTEM_PROMPT,
+    "performance": PERFORMANCE_SYSTEM_PROMPT,
+}
+
 
 def _segment_view(transcript: dict) -> str:
     return "\n".join(
@@ -137,16 +241,27 @@ def select_clips(
     transcript_path: Path,
     num_clips_min: int = 3,
     num_clips_max: int = 8,
+    selection_mode: str = "shorts",
 ) -> dict:
+    mode = "deeper" if str(selection_mode).lower().strip() == "deeper" else "shorts"
     transcript = json.loads(transcript_path.read_text())
     segments_text = _segment_view(transcript)
     duration_min = transcript["duration"] / 60
 
+    pick_label = "Deeper Clips" if mode == "deeper" else "clip candidates"
+    mode_note = (
+        "Use Deeper Clips mode: choose longer 2:30 to 5:00 midweek bridge excerpts "
+        "from the full sermon transcript, independent of any previously selected Shorts."
+        if mode == "deeper"
+        else "Use Shorts mode: choose 30 to 90 second short-form clips."
+    )
     user_text = (
         f"Sermon: {transcript['source']}\n"
         f"Duration: {duration_min:.1f} min\n"
-        f"Segments: {len(transcript['segments'])}\n\n"
-        f"Pick {num_clips_min} to {num_clips_max} clip candidates from this transcript.\n\n"
+        f"Segments: {len(transcript['segments'])}\n"
+        f"Mode: {mode}\n"
+        f"{mode_note}\n\n"
+        f"Pick {num_clips_min} to {num_clips_max} {pick_label} from this transcript.\n\n"
         f"--- TRANSCRIPT ---\n{segments_text}\n--- END TRANSCRIPT ---"
     )
 
@@ -161,6 +276,16 @@ def select_clips(
     cfg = app_settings.load()
     effort = cfg["clip_thinking_effort"]
     base_tokens = int(cfg["clip_max_output_tokens"])
+    # Which editorial guidance Claude picks against. "performance" is the
+    # reporting-tuned prompt (default); "classic" is the original, kept as an
+    # alternate. Deeper Clips intentionally uses a separate prompt and searches
+    # the whole transcript, not the previously selected Shorts pool.
+    strategy = cfg["clip_selection_strategy"]
+    if mode == "deeper":
+        strategy = "deeper"
+        system_prompt = DEEPER_SYSTEM_PROMPT
+    else:
+        system_prompt = SYSTEM_PROMPTS.get(strategy, PERFORMANCE_SYSTEM_PROMPT)
 
     # Self-healing: if thinking overruns the ceiling, the JSON is cut off
     # mid-string and the SDK either raises a JSON ValidationError while parsing
@@ -193,7 +318,7 @@ def select_clips(
                 thinking={"type": "adaptive"},
                 output_config={"effort": effort},
                 timeout=req_timeout,
-                system=SYSTEM_PROMPT,
+                system=system_prompt,
                 messages=[{
                     "role": "user",
                     "content": [{
@@ -238,6 +363,10 @@ def select_clips(
     return {
         "source": transcript["source"],
         "model": response.model,
+        # Which editorial guidance produced these clips, so Reporting can later
+        # compare performance by strategy.
+        "strategy": strategy,
+        "selection_mode": mode,
         # clips_version stamps this generation of clips.json so each export job
         # can record which "version" it was built against. When clips.json is
         # regenerated (e.g. volunteer re-runs Pick clips with a different range),
@@ -255,12 +384,20 @@ def select_clips(
     }
 
 
-def clips_path_for(source_name: str) -> Path:
-    return settings.data_work_dir / Path(source_name).stem / "clips.json"
+def _normalize_selection_mode(selection_mode: str | None = None) -> str:
+    return "deeper" if str(selection_mode or "shorts").lower().strip() == "deeper" else "shorts"
+
+
+def clips_path_for(source_name: str, selection_mode: str | None = None) -> Path:
+    mode = _normalize_selection_mode(selection_mode)
+    filename = "clips.deeper.json" if mode == "deeper" else "clips.json"
+    return settings.data_work_dir / Path(source_name).stem / filename
 
 
 def write_clips(result: dict) -> Path:
-    out = clips_path_for(result["source"])
+    mode = _normalize_selection_mode(result.get("selection_mode"))
+    result["selection_mode"] = mode
+    out = clips_path_for(result["source"], mode)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=2))
     # Wipe any per-clip user edits left over from a previous Claude

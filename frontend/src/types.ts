@@ -9,7 +9,9 @@ export type Sermon = {
 
 // Admin-tunable clip-selection settings (Settings view ↔ /api/app-settings).
 export type ThinkingEffort = 'low' | 'medium' | 'high'
+export type ClipSelectionStrategy = 'performance' | 'classic'
 export type AppSettings = {
+  clip_selection_strategy: ClipSelectionStrategy
   clip_thinking_effort: ThinkingEffort
   clip_max_output_tokens: number
   num_clips_min: number
@@ -39,6 +41,9 @@ export type ClipUserEdits = {
   // true = static crop at median face position (no per-frame tracking).
   // unset / false = smoothed tracking with deadband.
   lock_camera?: boolean | null
+  // Ordered identity ids for split-screen. 2+ entries => stacked panels in
+  // this order; null / <2 means no split (identity_id drives single crop).
+  panels?: number[] | null
 }
 
 export type ZoomLevel = 'tight' | 'medium' | 'wide' | 'stage'
@@ -73,6 +78,27 @@ export type Track = {
   track: [number, number, number][]  // [cx, cy, crop_h] per source frame
 }
 
+// One speaker's crop track within a split-screen panel. `panel_h` is the
+// band's height inside the 1920px-tall output; `track` mirrors Track.track
+// ([cx, cy, crop_h] per source frame) but cropped at the panel's aspect.
+export type PanelTrack = {
+  identity_id: number
+  panel_h: number
+  track: [number, number, number][]
+}
+
+// Multi-panel preview payload from /clip-tracks. All panels share n_frames /
+// src / fps (same clip range), so one playhead-derived index drives them all.
+export type ClipTracks = {
+  n_frames: number
+  src_w: number
+  src_h: number
+  fps: number
+  out_w: number
+  out_h: number
+  panels: PanelTrack[]
+}
+
 export type Identity = {
   id: number
   n_samples: number
@@ -102,10 +128,14 @@ export type Me = {
   anonymous: boolean
 }
 
+export type ClipSelectionMode = 'shorts' | 'deeper'
+
 export type ClipsFile = {
   source: string
   model: string
   created_at: string
+  strategy?: string
+  selection_mode?: ClipSelectionMode
   usage: Record<string, number>
   clips: Clip[]
 }
@@ -159,7 +189,7 @@ export type UsageResponse = {
 
 export type Job = {
   id: string
-  kind: 'transcribe' | 'youtube_download' | 'select_clips' | 'export_clip' | 'upload' | 'prescan_faces'
+  kind: 'transcribe' | 'youtube_download' | 'select_clips' | 'export_clip' | 'upload' | 'prescan_faces' | 'track_missing_url'
   status: JobStatus
   source: string | null
   transcript_path: string | null
@@ -179,4 +209,110 @@ export type Job = {
   started_at: string | null
   finished_at: string | null
   error: string | null
+}
+
+export type SocialPost = {
+  id: number
+  platform: string
+  sermon_source: string | null
+  clip_index: number | null
+  post_url: string | null
+  posted_at: string
+  title: string | null
+  logged_by_login: string | null
+  logged_by_name: string | null
+  created_at: string
+  url_entry_source: string | null
+  url_entered_at: string | null
+  url_entered_by_login: string | null
+  url_entered_by_name: string | null
+  link_match_source: string | null
+  link_matched_at: string | null
+  link_matched_by_login: string | null
+  link_matched_by_name: string | null
+  match_confidence: number | null
+  match_notes: string | null
+  views: number | null
+  likes: number | null
+  shares: number | null
+  comments: number | null
+  snapshot_at: string | null
+}
+
+export type PlatformBreakdown = {
+  platform: string
+  post_count: number
+  views: number
+  likes: number
+  shares: number
+  comments: number
+}
+
+export type TopPost = {
+  id: number
+  title: string | null
+  platform: string
+  views: number
+  likes: number
+  post_url: string | null
+  posted_at: string
+}
+
+export type ReportingSummary = {
+  total_posts: number
+  total_views: number
+  total_likes: number
+  total_shares: number
+  total_comments: number
+  by_platform: PlatformBreakdown[]
+  top_posts: TopPost[]
+}
+
+
+export type YouTubeBackfillCandidate = {
+  source: string
+  clip_index: number
+  title: string | null
+  duration_seconds: number
+  exported_filename: string | null
+  confidence: number | null
+  title_score: number | null
+  duration_score: number | null
+}
+
+export type YouTubeBackfillVideo = {
+  video_id: string
+  url: string
+  title: string | null
+  description: string | null
+  published_at: string | null
+  duration_seconds: number | null
+  privacy_status: string | null
+  views: number | null
+  likes: number | null
+  comments: number | null
+}
+
+export type YouTubeBackfillItem = {
+  video: YouTubeBackfillVideo
+  status: string
+  existing_post_id: number | null
+  best: YouTubeBackfillCandidate | null
+  candidates: YouTubeBackfillCandidate[]
+}
+
+export type YouTubeBackfillQueue = {
+  created_at: string
+  channel: { id?: string | null; title?: string | null }
+  summary: {
+    uploads_total: number
+    shorts_total: number
+    already_tracked: number
+    strong: number
+    review: number
+    unmatched: number
+    decided?: number
+    queue?: number
+  }
+  items: YouTubeBackfillItem[]
 }
